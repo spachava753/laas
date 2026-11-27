@@ -86,6 +86,13 @@ func (v *fnVerifier) expr(e ast.Expr, st *state, guard []*logic.Term) *logic.Ter
 // guard holds the conditions under which the expression is evaluated at all,
 // which matters on the right of && and ||.
 func (v *fnVerifier) eval(e ast.Expr, st *state, guard []*logic.Term) value {
+	if v.census != nil {
+		stub, done := v.censusEval(e, st)
+		if done == nil {
+			return stub
+		}
+		defer done()
+	}
 	defer v.begin()()
 	// A conversion to an interface type is checked where it is made; an
 	// expression that Go converts and that is evaluated anywhere else

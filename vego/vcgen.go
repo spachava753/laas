@@ -395,6 +395,9 @@ type fnVerifier struct {
 	// that did not hold, which stands for the conjunct's own proof; see
 	// framedLoop.
 	lastSplit *solver.Result
+	// census is set for a verifier of an attempt of a census; see
+	// census.go.
+	census *censusFunc
 }
 
 // run executes one task on a function, turning the panics that abandon a
@@ -460,6 +463,12 @@ func (v *fnVerifier) enter() *state {
 	for i, param := range fn.params {
 		leaves, ok := layoutOf(param.Type())
 		if !ok && v.lenient {
+			continue
+		}
+		if !ok && v.census != nil {
+			// A census goes on without the parameter; a use of it refuses
+			// with the class of its type.
+			v.censusRefuse(param.Pos(), typeClass(param.Type()), fmt.Sprintf("%s has unsupported type %s%s", param.Name(), param.Type(), unsupportedHint(param.Type())))
 			continue
 		}
 		if !ok {
@@ -534,6 +543,10 @@ func (v *fnVerifier) enter() *state {
 	for _, result := range fn.results {
 		_, ok := layoutOf(result.Type())
 		if !ok && v.lenient {
+			continue
+		}
+		if !ok && v.census != nil {
+			v.censusRefuse(fn.obj.Pos(), typeClass(result.Type()), fmt.Sprintf("result type %s is not supported%s", result.Type(), unsupportedHint(result.Type())))
 			continue
 		}
 		if !ok {
@@ -718,27 +731,18 @@ func (v *fnVerifier) verify() {
 		v.unsupported(fn.decl.Pos(), rGenericDeclared, "generic functions are not supported yet")
 	}
 	if fn.closure != nil {
-		v.checkClosure()
+		v.censusCheck("checkClosure", v.checkClosure)
 	}
-	v.checkSourceCallsUses()
+	v.censusCheck("checkSourceCallsUses", v.checkSourceCallsUses)
 	for _, rc := range v.pkgVerifier.closures {
 		if rc.outer == fn.decl && rc.refused != "" {
-			v.unsupported(rc.refusedAt, rClosure, rc.refused)
+			v.censusCheck(fmt.Sprintf("closure %d", rc.lit.Pos()), func() { v.unsupported(rc.refusedAt, rClosure, rc.refused) })
 		}
 	}
-	v.checkCopies(fn.decl)
+	v.censusCheck("checkCopies", func() { v.checkCopies(fn.decl) })
 	// A variable whose name means something else in annotations would be
 	// read as that other thing, silently.
-	ast.Inspect(fn.decl, func(n ast.Node) bool {
-		if id, ok := n.(*ast.Ident); ok {
-			variable, isVar := v.info.Defs[id].(*types.Var)
-			local := !slices.Contains(fn.params, variable) && !slices.Contains(fn.results, variable)
-			if isVar && !variable.IsField() && fn.ambiguous(id.Name, local) {
-				v.unsupported(id.Pos(), rAmbiguousName, fmt.Sprintf("the variable %s has a name that means something else in annotations; rename it", id.Name))
-			}
-		}
-		return true
-	})
+	v.censusCheck("names", func() { v.checkNames() })
 	// A defer statement puts a call off until its own frame returns, the
 	// function or the literal it is written in, so only a loop of that
 	// frame repeats it.
@@ -746,13 +750,16 @@ func (v *fnVerifier) verify() {
 	v.boxed = v.findBoxed(fn.decl.Body)
 	for _, rc := range v.pkgVerifier.closures {
 		if variable := capturesBoxed(rc, v.boxed); rc.outer == fn.decl && variable != nil {
-			v.unsupported(rc.lit.Pos(), rClosure, fmt.Sprintf("%s captures %s, whose address is taken in %s, by & or by a method with a pointer receiver or "+
-				"by slicing it, so that it lives in memory; a recursive closure cannot capture such a variable yet", closureName(rc.variable), variable.Name(), fn.obj.Name()))
+			v.censusCheck(fmt.Sprintf("captures %d", rc.lit.Pos()), func() {
+				v.unsupported(rc.lit.Pos(), rClosure, fmt.Sprintf("%s captures %s, whose address is taken in %s, by & or by a method with a pointer receiver or "+
+					"by slicing it, so that it lives in memory; a recursive closure cannot capture such a variable yet", closureName(rc.variable), variable.Name(), fn.obj.Name()))
+			})
 		}
 	}
-	v.classifyLiterals()
-	v.checkHidden(fn.decl.Body)
-	v.checkNotWritten(fn.decl.Body)
+	v.captured = map[*types.Var]int{}
+	v.censusCheck("classifyLiterals", v.classifyLiterals)
+	v.censusCheck("checkHidden", func() { v.checkHidden(fn.decl.Body) })
+	v.censusCheck("checkNotWritten", func() { v.checkNotWritten(fn.decl.Body) })
 	v.reportOwnOrigins()
 	st := v.enter()
 	for _, variable := range slices.Concat(fn.params, fn.results) {
@@ -760,21 +767,11 @@ func (v *fnVerifier) verify() {
 			v.bind(st, variable, st.vals[variable])
 		}
 	}
-	// A precondition that nothing satisfies would make every claim about
-	// the function provable.
-	if v.quickly(st, nil, logic.False()) {
-		if why := v.lockContradiction(fn); why != "" {
-			v.report(fn.decl.Name.Pos(), rAnnotationFault, "%s", why)
-		} else {
-			v.report(fn.decl.Name.Pos(), rAnnotationFault, "nothing can satisfy the Requires clauses of %s together with what the types of its parameters guarantee, "+
-				"so verifying it would prove nothing", fn.obj.Name())
-		}
-	} else {
-		v.checkDeclaredRequires(st)
-		v.checkHiddenRequires(st)
-	}
-	for _, refused := range v.entryOnly(st) {
-		v.report(refused.clause.pos, rAnnotationFault, "%s", refused.message(fn.obj.Name()))
+	// A census asks nothing of the contract it looks at the function with:
+	// whether its Requires can be met, or speak of the return, is what an
+	// annotation of the user's decides (F2 of the design review of F41).
+	if v.census == nil {
+		v.checkEntry(st)
 	}
 	if left, ok := v.readKeysLeft(fn.measure, &specEnv{v: v, sink: st, fn: fn, args: v.entry, now: memory{}}); ok {
 		// A count of keys is never negative.
@@ -786,13 +783,20 @@ func (v *fnVerifier) verify() {
 	}
 	body := fn.decl.Body
 	v.seq(body.List, body.Lbrace, body.Rbrace, st, ctrl{}, func(end *state) {
-		v.returned(end, nil, body.Rbrace)
+		v.censusCheck("end", func() { v.returned(end, nil, body.Rbrace) })
 	})
 	// A conversion to an interface type of a value without an expression
 	// of its own was not checked anywhere.
 	if unplaced := v.findConversions().unplaced[fn.decl]; len(unplaced) > 0 {
-		v.unsupported(unplaced[0], rConvUnplaced, "Go converts a value to an interface type here, and which expression it converts could not be told, "+
-			"as for one result of a call with several, so the conversion cannot be checked; assign the value to a variable of its own type first")
+		v.censusCheck("unplaced", func() {
+			v.unsupported(unplaced[0], rConvUnplaced, "Go converts a value to an interface type here, and which expression it converts could not be told, "+
+				"as for one result of a call with several, so the conversion cannot be checked; assign the value to a variable of its own type first")
+		})
+	}
+	// A census proves nothing, so what follows, which judges what was
+	// proved, does not run.
+	if v.census != nil {
+		return
 	}
 	// Which calls decide the failures only says whether the function is
 	// excused by the always-fails check, which a function that reported a
@@ -826,7 +830,47 @@ func (v *fnVerifier) verify() {
 	}
 }
 
+// checkNames refuses a variable whose name means something else in
+// annotations, which would be read as that other thing, silently.
+func (v *fnVerifier) checkNames() {
+	fn := v.fn
+	ast.Inspect(fn.decl, func(n ast.Node) bool {
+		if id, ok := n.(*ast.Ident); ok {
+			variable, isVar := v.info.Defs[id].(*types.Var)
+			local := !slices.Contains(fn.params, variable) && !slices.Contains(fn.results, variable)
+			if isVar && !variable.IsField() && fn.ambiguous(id.Name, local) {
+				v.unsupported(id.Pos(), rAmbiguousName, fmt.Sprintf("the variable %s has a name that means something else in annotations; rename it", id.Name))
+			}
+		}
+		return true
+	})
+}
+
+// checkEntry checks the contract a function is verified against where it
+// starts: that something can satisfy its Requires, and that its Ensures
+// speaks of the return.
+func (v *fnVerifier) checkEntry(st *state) {
+	fn := v.fn
+	// A precondition that nothing satisfies would make every claim about
+	// the function provable.
+	if v.quickly(st, nil, logic.False()) {
+		if why := v.lockContradiction(fn); why != "" {
+			v.report(fn.decl.Name.Pos(), rAnnotationFault, "%s", why)
+		} else {
+			v.report(fn.decl.Name.Pos(), rAnnotationFault, "nothing can satisfy the Requires clauses of %s together with what the types of its parameters guarantee, "+
+				"so verifying it would prove nothing", fn.obj.Name())
+		}
+	} else {
+		v.checkDeclaredRequires(st)
+		v.checkHiddenRequires(st)
+	}
+	for _, refused := range v.entryOnly(st) {
+		v.report(refused.clause.pos, rAnnotationFault, "%s", refused.message(fn.obj.Name()))
+	}
+}
+
 func (v *fnVerifier) unsupported(pos token.Pos, class refusal, msg string) {
+	v.censusRefused()
 	panic(unsupported{pos, msg, class})
 }
 
@@ -843,6 +887,7 @@ func (v *fnVerifier) misread(c *clause, err error) {
 	// being verified stops here, so it gets a report of its own.
 	if !v.ownClause(c) {
 		at := v.pass.Fset.Position(c.pos)
+		v.censusRefused()
 		panic(unsupported{pos: v.askAt, class: rUnreadable, msg: fmt.Sprintf("an annotation that it relies on here cannot be read: the %s annotation at %s:%d:%d (%v)",
 			c.kind, filepath.Base(at.Filename), at.Line, at.Column, err)})
 	}
@@ -1051,16 +1096,18 @@ func (v *fnVerifier) seq(list []ast.Stmt, from, to token.Pos, st *state, c ctrl,
 	}
 	defer v.at(list[0].Pos())()
 	rest := func(next *state) { v.seq(list[1:], list[0].End(), to, next, c, k) }
-	switch s := list[0].(type) {
-	case *ast.ForStmt:
-		v.forStmt(s, spec, nil, st, v.logging(s, rest))
-	case *ast.RangeStmt:
-		v.rangeStmt(s, spec, st, v.logging(s, rest))
-	case *ast.LabeledStmt:
-		v.labeled(s, spec, st, c, rest)
-	default:
-		v.stmt(s, st, c, rest)
-	}
+	v.censusStmt(list[0], st, c, rest, func(rest func(*state)) {
+		switch s := list[0].(type) {
+		case *ast.ForStmt:
+			v.forStmt(s, spec, nil, st, v.logging(s, rest))
+		case *ast.RangeStmt:
+			v.rangeStmt(s, spec, st, v.logging(s, rest))
+		case *ast.LabeledStmt:
+			v.labeled(s, spec, st, c, rest)
+		default:
+			v.stmt(s, st, c, rest)
+		}
+	})
 }
 
 // stmt executes one statement and passes every resulting state to k.

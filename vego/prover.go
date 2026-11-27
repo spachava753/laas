@@ -20,6 +20,9 @@ type solverUnavailable struct{ err error }
 
 // solver returns the solver for the package, starting it on first use.
 func (pv *pkgVerifier) solver() *solver.Solver {
+	if pv.checkingContract > 0 {
+		panic("vego: internal error: a census asked a question while it checked whether a contract can be used")
+	}
 	if pv.z3 == nil {
 		s, err := solver.Open(pv.z3Path, pv.cacheDir)
 		if err != nil {

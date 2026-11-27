@@ -157,6 +157,7 @@ var testCache string
 // it only reports that nothing was verified.
 func newAnalyzer() *analysis.Analyzer {
 	effort, audit, trustPath, otherTags, z3Path, printCost, cacheDir, ahead := 0, false, "", "", "", false, "", true
+	censusOut, censusScope := "", ""
 	analyzer := &analysis.Analyzer{
 		Name: "vego",
 		Doc: `verifies functions against their // @ specifications
@@ -216,6 +217,19 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 		"other-tags",
 		"",
 		"comma-separated words that other tools read after \"// @\", as in Summary,Param; any other unknown word there is an error",
+	)
+	analyzer.Flags.StringVar(
+		&censusOut,
+		"census",
+		"",
+		"instead of verifying, look at every function of the module -vego.census-scope names as if it had the weakest contract, prove nothing, "+
+			"and append what stops each to this file, one JSON line per function",
+	)
+	analyzer.Flags.StringVar(
+		&censusScope,
+		"census-scope",
+		"",
+		"the module path whose packages -vego.census looks at, or std for the standard library",
 	)
 	analyzer.ResultType = reflect.TypeFor[*Usage]()
 	analyzer.FactTypes = []analysis.Fact{new(contractFact), new(predicatesFact), new(usageFact), new(invariantFact), new(sentinelsFact), new(sentinelWritesFact), new(sentinelRelianceFact), new(stateFact), new(ownsFact), new(fixedFact), new(coversFact), new(writesFact), new(initialisersFact)}
@@ -283,6 +297,15 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 			}
 		}
 		pv := verifier(pass)
+		if censusOut != "" || censusScope != "" {
+			if censusOut == "" || censusScope == "" {
+				return nil, fmt.Errorf("-vego.census and -vego.census-scope are given together")
+			}
+			// Every package of a census run is analysed offline, those the
+			// census does not look at too, since a dependency checks the
+			// entries of its types (F2 of the design review of F41).
+			return pv.runCensus(censusOut, censusScope, trustPath, censusPackage(pass, censusScope))
+		}
 		if refuseCache {
 			pv.usage = &Usage{}
 			pv.collect()
@@ -530,6 +553,12 @@ type funcInfo struct {
 	// callsClauses holds the Calls annotations of a verified function,
 	// which give its function parameters contracts; see sourcecalls.go.
 	callsClauses []*clause
+	// censusMade is set for the weakest contract a census gives a function
+	// of the module that has none.
+	censusMade bool
+	// inputsOnly is set for a shipped entry that only the declaration that
+	// inputs end makes usable, which a census counts where it is used.
+	inputsOnly bool
 }
 
 // spelling returns the contract whose clauses a function's annotations
@@ -881,6 +910,11 @@ type pkgVerifier struct {
 	// collected, in ownsOrder; see owns.go.
 	ownsSource map[*types.TypeName]*ownsDeclSource
 	ownsOrder  []*types.TypeName
+	// census is set for a package a census looks at, and checkingContract
+	// while a check of whether a contract can be used runs, which a census
+	// does not ask; see census.go.
+	census           *censusRun
+	checkingContract int
 }
 
 // report emits a diagnostic once per position and message. Symbolic execution
@@ -889,6 +923,11 @@ type pkgVerifier struct {
 // fault of an annotation, or a refusal of the Go it stands at.
 func (pv *pkgVerifier) report(pos token.Pos, class refusal, format string, args ...any) {
 	if pv.capturing != nil {
+		// What a census captures decides whether code it checks refuses,
+		// which no obligation it cannot prove does.
+		if pv.census != nil && class == rObligation {
+			return
+		}
 		at := pv.pass.Fset.Position(pos)
 		*pv.capturing = append(*pv.capturing, fmt.Sprintf("%s:%d:%d\x00%s", filepath.Base(at.Filename), at.Line, at.Column, fmt.Sprintf(format, args...)))
 		return
@@ -914,6 +953,10 @@ func (pv *pkgVerifier) report(pos token.Pos, class refusal, format string, args 
 		return
 	}
 	pv.reported[key] = true
+	if pv.census != nil {
+		pv.censusReported(pos, class, strings.TrimPrefix(msg, "vego: "))
+		return
+	}
 	pv.pass.Report(analysis.Diagnostic{Pos: pos, Message: msg})
 }
 
@@ -1486,6 +1529,9 @@ func (pv *pkgVerifier) collect() {
 		}
 	}
 	pv.finishClosures()
+	if pv.census != nil && pv.census.looked {
+		pv.synthesize()
+	}
 	for _, fn := range pv.order {
 		pv.readSourceCalls(fn)
 	}
@@ -1513,7 +1559,8 @@ func (pv *pkgVerifier) collect() {
 	// A contract speaks of the results by the names the function gives
 	// them, so a verified function has to give each of them one.
 	for _, fn := range pv.order {
-		if !fn.annotated() {
+		// The weakest contract a census gives names no result.
+		if !fn.annotated() || fn.censusMade {
 			continue
 		}
 		for _, result := range fn.results {
@@ -1526,7 +1573,7 @@ func (pv *pkgVerifier) collect() {
 		}
 	}
 	for _, fn := range pv.order {
-		if fn.annotated() && pv.entryFor(fn.obj.FullName()) != nil && !isIfaceMethod(fn.obj) {
+		if fn.annotated() && !fn.censusMade && pv.entryFor(fn.obj.FullName()) != nil && !isIfaceMethod(fn.obj) {
 			pv.report(fn.decl.Name.Pos(), rAnnotationFault, "%s has annotations and a trusted contract; "+
 				"a function is either verified or trusted, not both", fn.obj.Name())
 		}
@@ -1783,6 +1830,10 @@ func (pv *pkgVerifier) contractOf(callee *types.Func) *funcInfo {
 		return pv.trustedContract(callee)
 	}
 	if own := pv.funcs[callee]; own != nil && own.annotated() {
+		// The weakest contract of a census gives way to an entry.
+		if own.censusMade && !isGeneric(callee) && pv.trustedContract(callee) != nil {
+			return pv.trustedContract(callee)
+		}
 		return own
 	}
 	// A generic function has no contract of its own: only an instantiation
@@ -1796,7 +1847,13 @@ func (pv *pkgVerifier) contractOf(callee *types.Func) *funcInfo {
 		}
 		return imported
 	}
-	return pv.trustedContract(callee)
+	if trusted := pv.trustedContract(callee); trusted != nil || pv.census == nil {
+		return trusted
+	}
+	if callee.Pkg() != nil && pv.inScope(callee.Pkg().Path()) && !isGeneric(callee) {
+		return pv.assumedContract(callee)
+	}
+	return nil
 }
 
 // place binds a clause to a function and returns that function. Clauses inside

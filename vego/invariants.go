@@ -180,7 +180,7 @@ func (pv *pkgVerifier) checkInvariantsDeclared() {
 			st := &state{vals: map[*types.Var]value{}, mem: memory{}, brk: logic.Const("brk", logic.Ref), noted: map[string]bool{}}
 			self := v.unknown("self", name.Type(), st)
 			v.assumeInvariants(st, nil, st.mem, self, name.Type(), "")
-			if pv.contradictory(st.hyps) {
+			if pv.census == nil && pv.contradictory(st.hyps) {
 				set.broken = true
 				pv.report(set.clauses[0].pos, rAnnotationFault, "the invariants of %s contradict each other, so no value of the type could exist", name.Name())
 			}

@@ -1194,7 +1194,18 @@ func (pv *pkgVerifier) checkTrusted(fn *funcInfo) {
 		// writes through another that is the same object.
 		v.primedPaths(fn)
 		entry := v.enter()
-		for _, refused := range v.entryOnly(entry) {
+		// A census takes the entry as if what it asks of an entry held;
+		// shipped entries are tested, and a project's are its own (F2 of
+		// the design review of F41).
+		if pv.census != nil {
+			pv.checkingContract++
+			defer func() { pv.checkingContract-- }()
+		}
+		var refused []entryOnlyConjunct
+		if pv.census == nil {
+			refused = v.entryOnly(entry)
+		}
+		for _, refused := range refused {
 			fn.typeDefect("%s", refused.message(fn.obj.Name()))
 		}
 		// The requires of calls are read once here, so that a name they
@@ -1235,6 +1246,9 @@ func (pv *pkgVerifier) checkTrusted(fn *funcInfo) {
 		// The one contradiction an entry may state is that its function
 		// never returns, which exits says how: by ending the process. Its
 		// requires may still not contradict each other.
+		if pv.census != nil {
+			return
+		}
 		if neverReturns(fn) {
 			if v.quickly(entry, nil, logic.False()) {
 				fn.typeDefect("it contradicts itself, so anything could be proved from it")

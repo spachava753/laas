@@ -651,7 +651,12 @@ func (v *fnVerifier) callDecoder(call, limit *ast.CallExpr, st *state, guard []*
 		// clause reads such memory is decided by proof, as for an Ensures
 		// that speaks of the entry state (entryonly.go, F30).
 		var c string
-		v.quietly(func() { c = v.readsReadFrame(read, readArgs, st) })
+		// Whether the contract of Read speaks only of what it leaves alone
+		// decides whether its contract can be used, which a census does
+		// not ask (F2 of the design review of F41).
+		if v.census == nil {
+			v.quietly(func() { c = v.readsReadFrame(read, readArgs, st) })
+		}
 		if c != "" {
 			v.unsupported(call.Pos(), rJSONDecodeUnproved, fmt.Sprintf("the decoder calls %s.Read as many times as it needs, and %q in the contract of Read reads memory that Read modifies, "+
 				"which each call may change; give Read a contract that says nothing of what it modifies of the reader, or read the body into a buffer and decode it with json.Unmarshal",

@@ -81,6 +81,11 @@ func (v *fnVerifier) jump(s *ast.BranchStmt, st *state) {
 			to = target.cont
 		}
 	}
+	if to == nil && v.census != nil && v.census.walking > 0 {
+		// Out of the body of a stubbed statement, which the census walks
+		// on its own.
+		return
+	}
 	if to == nil {
 		v.unsupported(s.Pos(), rSelect, fmt.Sprintf("%s %s is not supported: the label names a select statement or a statement that is not supported", s.Tok, s.Label.Name))
 	}

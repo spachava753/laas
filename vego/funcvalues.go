@@ -203,6 +203,20 @@ func (pv *pkgVerifier) checkValueContract(fn *funcInfo) {
 			fault(c.pos, "in %s annotation: %v", c.kind, err)
 		}
 		state := v.enter()
+		// A census uses the contract as if every check of whether it can
+		// be used passed: what they ask, it cannot answer (F2 of the
+		// design review of F41).
+		if pv.census != nil {
+			pv.checkingContract++
+			defer func() { pv.checkingContract-- }()
+			v.primedPaths(fn)
+			if !entry {
+				for _, defect := range fn.defects {
+					pv.report(at, rContractUnusable, "the contract of %s cannot be used: %s", title, defect)
+				}
+			}
+			return
+		}
 		if v.quickly(state, nil, logic.False()) {
 			fault(at, "nothing can satisfy the Requires clauses of %s together with what the types of its parameters guarantee, "+
 				"so no value of the type could be called", title)
@@ -806,6 +820,19 @@ func vouchingContract(T *funcInfo) string {
 // valueContract returns the contract that a call through a value of a type
 // is checked against, or nil if the type has none.
 func (pv *pkgVerifier) valueContract(t types.Type) *funcInfo {
+	fn := pv.foundValueContract(t)
+	// A census takes a function type of the module that has no contract
+	// with the weakest one.
+	if named, ok := types.Unalias(t).(*types.Named); fn == nil && ok && isFunc(t) && pv.census != nil {
+		if name := named.Origin().Obj(); name.Pkg() != nil && pv.inScope(name.Pkg().Path()) {
+			return pv.assumedType(name)
+		}
+	}
+	return fn
+}
+
+// foundValueContract is valueContract without the contracts of a census.
+func (pv *pkgVerifier) foundValueContract(t types.Type) *funcInfo {
 	named, ok := types.Unalias(t).(*types.Named)
 	if !ok || !isFunc(t) {
 		return nil
@@ -846,8 +873,9 @@ func (pv *pkgVerifier) valueContract(t types.Type) *funcInfo {
 func (v *fnVerifier) usableValueContract(fun ast.Expr, st *state, guard []*logic.Term) *funcInfo {
 	t := v.info.TypeOf(fun)
 	fn := v.valueContract(t)
+	v.noteAssumed(fun.Pos(), fn, rAssumedType, t.String())
 	if fn == nil {
-		v.unsupported(fun.Pos(), v.funcValueClass(t), fmt.Sprintf("%s has type %s, which has no contract; "+
+		v.unsupported(fun.Pos(), v.funcValueClass(fun, t), fmt.Sprintf("%s has type %s, which has no contract; "+
 			"declare a named function type with a contract and use it here%s", types.ExprString(fun), t, v.funcTypeHint(t)))
 	}
 	return v.usable(fun.Pos(), fn, fn.obj.Name(), st, guard, true)
@@ -1497,7 +1525,7 @@ func (v *fnVerifier) functionValue(e ast.Expr, want types.Type, st *state, guard
 		if isLiteral {
 			what = "the function literal"
 		}
-		v.unsupported(e.Pos(), v.funcValueClass(want), fmt.Sprintf("%s is used as a value of type %s, which has no contract; "+
+		v.unsupported(e.Pos(), v.funcValueClass(nil, want), fmt.Sprintf("%s is used as a value of type %s, which has no contract; "+
 			"declare a named function type with a contract and use it here%s", what, want, v.funcTypeHint(want)))
 	}
 	T = v.usable(e.Pos(), T, T.obj.Name(), st, guard, false)
@@ -1742,6 +1770,7 @@ func (v *fnVerifier) madeAs(e, fun ast.Expr, T *funcInfo, callee *types.Func, as
 // carry renames values of the state where the value is made into the copy.
 func (v *fnVerifier) subVerifier(fn *funcInfo, st *state, guard []*logic.Term, site inlineSite) (sv *fnVerifier, entry *state, carry *transport) {
 	sv = v.newVerifier(fn)
+	sv.census = v.census
 	sv.originBody = v.bodyOrigin()
 	sv.boxed = v.boxed
 	sv.sites = append(slices.Clip(v.sites), site)

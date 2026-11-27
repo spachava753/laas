@@ -121,6 +121,9 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 			}
 			// Under the declared memory a buffer's Write cannot fail to
 			// grow, and what refuses the conversion is what it owns, below.
+			if why := growsUnbounded(from); why != "" && v.sizesOf() != nil && v.census != nil {
+				v.census.note(v.pkgVerifier, e.Pos(), withDetail(rDeclaredSizes, from.String()), "")
+			}
 			if why := growsUnbounded(from); why != "" && v.sizesOf() == nil {
 				shown := func(t types.Type) string { return types.TypeString(t, types.RelativeTo(v.pass.Pkg)) }
 				v.unsupported(e.Pos(), rConvBuffer, fmt.Sprintf("converting a value of type %s to %s is not supported: %s%s", shown(from), shown(want), why,
@@ -714,6 +717,17 @@ func methodTitle(method *types.Func) string {
 // methodContract returns the contract of a method of an interface type, or
 // nil if it has none.
 func (pv *pkgVerifier) methodContract(method *types.Func) *funcInfo {
+	fn := pv.foundMethodContract(method)
+	// A census takes a method of an interface of the module that has no
+	// contract with the weakest one.
+	if fn == nil && pv.census != nil && method.Pkg() != nil && pv.inScope(method.Pkg().Path()) {
+		return pv.assumedMethod(method)
+	}
+	return fn
+}
+
+// foundMethodContract is methodContract without the contracts of a census.
+func (pv *pkgVerifier) foundMethodContract(method *types.Func) *funcInfo {
 	if method.Pkg() == pv.pass.Pkg {
 		if fn := pv.ifaceMethods[method]; fn != nil {
 			return fn
@@ -828,6 +842,7 @@ func (v *fnVerifier) usableMethodContract(call *ast.CallExpr, callee *types.Func
 		v.unsupported(call.Pos(), typeClass(selection.Recv()), fmt.Sprintf("calling %s, a method of %s, is not supported yet%s", callee.Name(), selection.Recv(), unsupportedHint(selection.Recv())))
 	}
 	fn := v.methodContract(callee)
+	v.noteAssumed(call.Pos(), fn, rAssumedMethod, callee.FullName())
 	if fn == nil {
 		v.unsupported(call.Pos(), withDetail(rIfaceNoContract, callee.FullName()), fmt.Sprintf("%s calls %s, which has no contract; a method of an interface gets one in its doc comment "+
 			"where the interface is declared, with // @ annotations%s", types.ExprString(call.Fun), methodTitle(callee), v.entryHint(callee.Pkg(), callee.Pos(), callee.FullName())))

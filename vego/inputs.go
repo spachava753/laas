@@ -487,6 +487,7 @@ func (pv *pkgVerifier) withInputs(fn *funcInfo, entry *trustEntry, formulas []tr
 		return formulas
 	}
 	decl := pv.inputsOf()
+	fn.inputsOnly = decl != nil
 	if decl == nil {
 		if !slices.ContainsFunc(fn.defects, func(d string) bool { return strings.Contains(d, "returns only for an input that ends") }) {
 			fn.defect("%s returns only for an input that ends, which is known only where the trust file declares that inputs end; "+

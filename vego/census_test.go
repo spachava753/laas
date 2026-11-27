@@ -1,15 +1,22 @@
 package vego
 
 import (
+	"bufio"
+	"encoding/json"
 	"go/ast"
 	"go/importer"
 	"go/parser"
 	"go/token"
 	"go/types"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+
+	"golang.org/x/tools/go/analysis"
+	"golang.org/x/tools/go/analysis/checker"
+	"golang.org/x/tools/go/packages"
 )
 
 // classifiers are the functions whose result a place that refuses may hand
@@ -162,8 +169,9 @@ func TestRefusalClasses(t *testing.T) {
 					}
 				}
 			case *ast.FuncDecl:
-				// What the classifiers return counts as used.
-				if (classifiers[n.Name.Name] || n.Name.Name == "typeClassOf") && n.Body != nil {
+				// What the classifiers return, and the events the census
+				// notes itself, count as used.
+				if n.Body != nil {
 					ast.Inspect(n.Body, func(m ast.Node) bool {
 						if id, ok := m.(*ast.Ident); ok && declared[id.Name] {
 							used[id.Name] = true
@@ -322,5 +330,162 @@ func Generic[T any](x T, p *T) {}
 	}
 	if checked < 50 {
 		t.Errorf("only %d types without a layout were met", checked)
+	}
+}
+
+// censusRun runs the analyzer on packages of testdata/census with the
+// given flags, and returns the diagnostics.
+func censusCorpus(t *testing.T, flags map[string]string, patterns ...string) []string {
+	t.Helper()
+	root, err := filepath.Abs(filepath.Join("testdata", "census"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	analyzer := newAnalyzer()
+	for name, value := range flags {
+		if err := analyzer.Flags.Set(name, value); err != nil {
+			t.Fatal(err)
+		}
+	}
+	config := &packages.Config{
+		Mode: packages.LoadAllSyntax,
+		Dir:  filepath.Join(root, "src"),
+		Env:  append(os.Environ(), "GOPATH="+root, "GO111MODULE=off", "GOPROXY=off", "GOWORK=off"),
+	}
+	loaded, err := packages.Load(config, patterns...)
+	if err != nil {
+		t.Fatalf("load packages: %v", err)
+	}
+	if packages.PrintErrors(loaded) > 0 {
+		t.Fatal("the test packages do not compile")
+	}
+	graph, err := checker.Analyze([]*analysis.Analyzer{analyzer}, loaded, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var diagnostics []string
+	for action := range graph.All() {
+		if action.Err != nil && !strings.Contains(action.Err.Error(), "failed prerequisites") {
+			t.Logf("%s: %v", action, action.Err)
+		}
+	}
+	for _, action := range graph.Roots {
+		if action.Err != nil {
+			t.Fatalf("analysis of %s failed: %v", action.Package.PkgPath, action.Err)
+		}
+		for _, d := range action.Diagnostics {
+			diagnostics = append(diagnostics, d.Message)
+		}
+	}
+	return diagnostics
+}
+
+// TestCensus runs the census on testdata/census and holds each function to
+// what it must report: the classes of its causes, what it assumed, and
+// whether it was looked at in full; and the first cause of each function
+// of census/first, which carries the weakest contract in source, to the
+// refusal the ordinary run makes of it.
+func TestCensus(t *testing.T) {
+	parallel(t)
+	out := filepath.Join(t.TempDir(), "census.jsonl")
+	// No Z3 may start: the path named is none.
+	if got := censusCorpus(t, map[string]string{"census": out, "census-scope": "census", "z3": "/nonexistent/z3", "cache": ""}, "census/..."); len(got) > 0 {
+		t.Fatalf("a census reports nothing, and it reported %q", got)
+	}
+	f, err := os.Open(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	lines := map[string]censusLine{}
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(nil, 1<<20)
+	for scanner.Scan() {
+		var line censusLine
+		if err := json.Unmarshal(scanner.Bytes(), &line); err != nil {
+			t.Fatal(err)
+		}
+		lines[line.Package+"."+line.Function] = line
+	}
+	kinds := func(line censusLine, kind string) []string {
+		var classes []string
+		for _, e := range line.Events {
+			if e.Kind == kind && !slices.Contains(classes, e.Class) {
+				classes = append(classes, e.Class)
+			}
+		}
+		slices.Sort(classes)
+		return classes
+	}
+	type want struct {
+		causes, assumed, annotate string
+		partial, stopped          bool
+	}
+	wants := map[string]want{
+		"census/through.add":               {},
+		"census/through.Sum":               {assumed: "assumed:module"},
+		"census/through.Index":             {},
+		"census/through.Each":              {annotate: "annotate:calls"},
+		"census/through.Total":             {assumed: "assumed:calls assumed:module"},
+		"census/through.(*file).Next":      {},
+		"census/through.Drain":             {assumed: "assumed:module-method"},
+		"census/through.Open":              {},
+		"census/through.Unreachable":       {},
+		"census/through.AfterExit":         {},
+		"census/through.Forever":           {},
+		"census/through.Exit":              {},
+		"census/through.Encode":            {},
+		"census/stops.Channel":             {causes: "channel:use"},
+		"census/stops.Address":             {causes: "address-of:element address-of:field"},
+		"census/stops.Stat":                {causes: "no-entry:std"},
+		"census/stops.Goroutine":           {causes: "channel:use goroutine:go"},
+		"census/stops.Generic":             {causes: "generic:declared", partial: true, stopped: true},
+		"census/stops.HandedThenExit":      {causes: "channel:use"},
+		"census/stops.EncodeThenChannel":   {causes: "channel:use"},
+		"census/stops.Twice":               {causes: "channel:use"},
+		"census/stops.UnusableThenChannel": {causes: "channel:use contract:unusable"},
+		"census/stops.Broken":              {causes: "annotation:broken", partial: true, stopped: true},
+		"census/first.Address":             {causes: "address-of:field"},
+		"census/first.Stat":                {causes: "no-entry:std"},
+		"census/first.Channel":             {causes: "channel:use"},
+		"census/first.Mixed":               {causes: "channel:use goroutine:go"},
+	}
+	for name, w := range wants {
+		line, ok := lines[name]
+		if !ok {
+			t.Errorf("%s has no line", name)
+			continue
+		}
+		got := want{causes: strings.Join(kinds(line, "cause"), " "), assumed: strings.Join(kinds(line, "assumed"), " "),
+			annotate: strings.Join(kinds(line, "annotate"), " "), partial: line.Unseen > 0, stopped: line.Stopped}
+		if got != w {
+			t.Errorf("%s: got %+v, want %+v (events %+v, unseen at %v)", name, got, w, line.Events, line.UnseenAt)
+		}
+	}
+	if len(lines) != len(wants) {
+		t.Errorf("%d lines for %d functions", len(lines), len(wants))
+	}
+	// The first cause is the ordinary run's refusal of the same function.
+	compared := 0
+	for _, d := range censusCorpus(t, map[string]string{"cache": ""}, "census/first") {
+		name, msg, ok := strings.Cut(strings.TrimPrefix(d, "vego: cannot verify "), ": ")
+		if !ok || !strings.HasPrefix(d, "vego: cannot verify ") {
+			continue
+		}
+		line := lines["census/first."+name]
+		first := ""
+		for _, e := range line.Events {
+			if e.Kind == "cause" || e.Kind == "proof" {
+				first = e.Message
+				break
+			}
+		}
+		if first != msg {
+			t.Errorf("%s: the census's first cause is %q, and the ordinary run's refusal %q", name, first, msg)
+		}
+		compared++
+	}
+	if compared != 4 {
+		t.Errorf("%d functions of census/first were compared with the ordinary run, not 4", compared)
 	}
 }

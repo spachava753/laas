@@ -137,6 +137,12 @@ func (e *InternalError) Error() string {
 
 // Prove reports whether goal follows from the hypotheses.
 func (s *Solver) Prove(hyps []*logic.Term, goal *logic.Term, opts Options) Result {
+	if s.offline {
+		if goal.Op == logic.OpTrue {
+			return Proved
+		}
+		return Unknown
+	}
 	return s.Check(append(hyps[:len(hyps):len(hyps)], logic.Not(goal)), opts)
 }
 
@@ -154,6 +160,9 @@ func (s *Solver) Check(facts []*logic.Term, opts Options) Result {
 // offer values after an unknown outcome too. The values are a candidate
 // for the caller to confirm by proof, never evidence by themselves.
 func (s *Solver) Model(facts []*logic.Term, opts Options, consts []*logic.Term) (Result, map[string]*logic.Term) {
+	if s.offline {
+		return Unknown, nil
+	}
 	// A satisfiability check whose ModelFirst is set is asked first without
 	// e-matching, at that limit, and, when that answer is open, as any other
 	// problem. Without e-matching, Z3 instantiates

@@ -302,6 +302,10 @@ func (v *fnVerifier) contractFor(call *ast.CallExpr, callee *types.Func, st *sta
 	// Nothing may be called on trust that is not written down: the callee
 	// is either verified against its annotations or has a trusted contract.
 	fn := v.contractOf(callee)
+	v.noteAssumed(call.Pos(), fn, rAssumedModule, callee.FullName())
+	if fn != nil && fn.inputsOnly && v.census != nil {
+		v.census.note(v.pkgVerifier, call.Pos(), withDetail(rDeclaredInputs, callee.FullName()), "")
+	}
 	if fn == nil && sig.Recv() != nil && growingMethods[callee.Name()] && growsUnbounded(sig.Recv().Type()) != "" {
 		// A contract a user might add would be false; say what to write
 		// instead.

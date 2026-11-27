@@ -119,6 +119,14 @@ func (a passedArg) text() string {
 // though what its elements refer to is the caller's.
 func (v *fnVerifier) evalPassed(a passedArg, st *state, guard []*logic.Term) value {
 	t := a.param.Type()
+	if v.census != nil && v.pkgVerifier.census.assumedParams[a.param] {
+		// A value of an unnamed function type handed to what the census
+		// takes with the weakest contract, which a Calls annotation might
+		// give a contract (F4 of the design review of F41); a literal is
+		// walked as one no attempt entered.
+		v.census.note(v.pkgVerifier, a.expr.Pos(), withDetail(rAssumedCalls, types.ExprString(a.expr)), "")
+		return v.unknown("census", t, st)
+	}
 	if !a.packed {
 		if _, ok := layoutOf(t); !ok {
 			v.unsupported(a.expr.Pos(), typeClass(t), fmt.Sprintf("arguments of type %s are not supported", t))

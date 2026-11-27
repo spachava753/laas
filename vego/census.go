@@ -1,10 +1,20 @@
 package vego
 
 import (
+	"encoding/json"
 	"fmt"
 	"go/ast"
+	"go/token"
 	"go/types"
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
+
+	"github.com/spachava753/laas/vego/internal/logic"
+	"github.com/spachava753/laas/vego/internal/solver"
+	"golang.org/x/tools/go/analysis"
 )
 
 // A census (-vego.census) looks at every function of a module as if it
@@ -170,6 +180,20 @@ const (
 	rHandApartUnproved     refusal = "handover:apart-unproved"
 	rOwnsStoreUnproved     refusal = "owns:store-unproved"
 
+	// Events of a census that are not refusals: callees and values of the
+	// module taken with the weakest contract, what only a declaration of the
+	// trust file lets through, and where the census stops a function.
+	rAssumedModule    refusal = "assumed:module"
+	rAssumedMethod    refusal = "assumed:module-method"
+	rAssumedType      refusal = "assumed:module-type"
+	rAssumedCalls     refusal = "assumed:calls"
+	rDeclaredSizes    refusal = "declared:sizes"
+	rDeclaredInputs   refusal = "declared:inputs"
+	rInternal         refusal = "limit:internal"
+	rLimitAttempts    refusal = "limit:attempts"
+	rAnnotationBroken refusal = "annotation:broken"
+	rAnnotateCalls    refusal = "annotate:calls"
+
 	// What a report is when it is not a refusal: an obligation that was not
 	// proved, which a user meets by annotating or changing the code, and a
 	// fault of an annotation or a trust file. The census counts neither.
@@ -317,6 +341,16 @@ var refusalClasses = map[refusal]string{
 	rJSONDecodeUnproved:    "a decoder over a reader whose Read contract is not shown to speak only of what Read leaves alone (JSON); made only when a proof fails",
 	rHandApartUnproved:     "a value handed over that is not shown to be the one whose footprint the function's Modifies places (Footprints); made only when a proof fails",
 	rOwnsStoreUnproved:     "the result of a call stored into an owned field that is not shown to be new (Ownership in source); made only when a proof fails",
+	rAssumedModule:         "a call of a function of the module with no contract, taken with the weakest contract; not a cause",
+	rAssumedMethod:         "a call of a method of an interface of the module with no contract, taken with the weakest contract; not a cause",
+	rAssumedType:           "a call of a value of a function type of the module with no contract, taken with the weakest contract; not a cause",
+	rAssumedCalls:          "a value of an unnamed function type handed to a function of the module taken with the weakest contract, which a Calls annotation on it might give a contract; not a cause",
+	rDeclaredSizes:         "what only the declared memory of the trust file lets through, as a buffer converted to an io.Writer; not a cause",
+	rDeclaredInputs:        "a shipped entry that only the declaration that inputs end makes usable; not a cause",
+	rInternal:              "a panic of the verifier that is no refusal; the census stops the function there (The prover)",
+	rLimitAttempts:         "more refusals in one function than the census follows; it stops the function there (The prover)",
+	rAnnotateCalls:         "a call of a parameter of an unnamed function type, which a Calls annotation on the function gives a contract; not a cause",
+	rAnnotationBroken:      "a function whose annotations cannot be read, which is not looked at (The annotation language)",
 	rObligation:            "an obligation that was not proved; not a cause",
 	rAnnotationFault:       "a fault of an annotation or of a trust file; not a cause",
 }
@@ -427,8 +461,17 @@ func (v *fnVerifier) varClass(variable *types.Var) refusal {
 }
 
 // funcValueClass returns the class of a call through, or a use as, a value
-// of a function type that has no contract.
-func (v *fnVerifier) funcValueClass(t types.Type) refusal {
+// of a function type that has no contract. A call of a parameter of the
+// function of an unnamed function type is one a Calls annotation on the
+// function gives a contract, which is the project's to write.
+func (v *fnVerifier) funcValueClass(fun ast.Expr, t types.Type) refusal {
+	if id, ok := ast.Unparen(fun).(*ast.Ident); ok && fun != nil {
+		if variable, ok := v.info.Uses[id].(*types.Var); ok && slices.Contains(v.fn.params, variable) {
+			if _, named := types.Unalias(t).(*types.Named); !named {
+				return withDetail(rAnnotateCalls, t.String())
+			}
+		}
+	}
 	return withDetail(rFuncNoContract, t.String())
 }
 
@@ -459,14 +502,14 @@ func (v *fnVerifier) addressClass(e ast.Expr) refusal {
 func (v *fnVerifier) callClass(callee *types.Func) refusal {
 	name := callee.FullName()
 	switch {
-	case callee.Pkg() == nil || !strings.Contains(strings.Split(callee.Pkg().Path(), "/")[0], "."):
-		return withDetail(rNoEntryStd, name)
-	case v.pkgVerifier.inScope(callee.Pkg().Path()) && isGeneric(callee):
+	case callee.Pkg() != nil && v.pkgVerifier.inScope(callee.Pkg().Path()) && isGeneric(callee):
 		// A generic function of the project waits for generic functions
 		// to be verified, not for an entry.
 		return withDetail(rGenericCalled, name)
-	case v.pkgVerifier.inScope(callee.Pkg().Path()):
+	case callee.Pkg() != nil && v.pkgVerifier.inScope(callee.Pkg().Path()):
 		return withDetail(rNoEntryModule, name)
+	case callee.Pkg() == nil || stdPackage(callee.Pkg().Path()):
+		return withDetail(rNoEntryStd, name)
 	}
 	return withDetail(rNoEntryOther, name)
 }
@@ -500,5 +543,784 @@ func rangeClass(t types.Type) refusal {
 // inScope reports whether a package is one of the module a census looks
 // at. Outside a census no package is.
 func (pv *pkgVerifier) inScope(path string) bool {
+	switch {
+	case pv.census == nil || !pv.census.looked:
+		return false
+	case pv.census.scope == "std":
+		return stdPackage(path)
+	}
+	return path == pv.census.scope || strings.HasPrefix(path, pv.census.scope+"/")
+}
+
+// stdPackage reports whether a package path is one of the standard
+// library's: its first element has no dot.
+func stdPackage(path string) bool {
+	first, _, _ := strings.Cut(path, "/")
+	return !strings.Contains(first, ".") && path != "main"
+}
+
+// The census mode. A census looks at every function with a body of the
+// packages of one module, without proving anything, and records what stops
+// the verifier in each. It runs instead of verification, in the packages
+// of the module -vego.census-scope names; every other package the driver
+// loads is analysed as without it.
+//
+// A function is looked at in attempts. Each attempt is a fresh verifier
+// that walks the function as verification does, with the weakest contract
+// when the function has none, and with a solver that starts no Z3 and
+// proves nothing (solver.Offline). A refusal ends the attempt, as it ends
+// verification. The census records it and stubs what was being executed
+// when it was made, the innermost expression with a layout or else the
+// statement, and the next attempt walks the function again from the start
+// with that stubbed: a stubbed expression is a value of its type about
+// which nothing is known, and a stubbed statement gives such values to
+// the variables it assigns, walks each body directly inside it once, and
+// goes on. No attempt goes on after a panic, so nothing of a verifier
+// outlives one; what does is the record: the causes, the stubs, and the
+// statements entered.
+
+// censusRun is the census of one package.
+type censusRun struct {
+	out, scope string
+	// looked is set for a package of the module the census looks at;
+	// any other is analysed offline for the facts its importers read.
+	looked  bool
+	records []*censusFunc
+	byDecl  map[*ast.FuncDecl]*censusFunc
+	// assumed holds the weakest contracts made for what of the module
+	// has none, and assumedParams the parameters of an unnamed function
+	// type of those contracts.
+	assumed       map[types.Object]*funcInfo
+	assumedParams map[*types.Var]bool
+	// ensures is the clause of the weakest contract.
+	ensures *clause
+}
+
+// censusFunc is what the census found in one function declaration,
+// together with the recursive closures inside it.
+type censusFunc struct {
+	fn      *funcInfo
+	events  []censusEvent
+	keys    map[string]bool
+	seen    map[ast.Stmt]bool
+	stubs   map[any]bool
+	stopped bool
+	// stack holds what the attempt is executing: statements, expressions,
+	// and the named checks of verify; at is its copy where the last
+	// refusal was made.
+	stack, at []any
+	// walking counts the bodies of stubbed statements being walked, out of
+	// which a labelled jump ends the path.
+	walking int
+}
+
+// censusEvent is a refusal or another event the census met.
+type censusEvent struct {
+	Class   string `json:"class"`
+	Detail  string `json:"detail,omitempty"`
+	Pos     string `json:"pos"`
+	Message string `json:"message,omitempty"`
+	Kind    string `json:"kind"`
+}
+
+// censusFatal holds the classes after which an attempt cannot be helped by
+// a stub: a body in type parameters and the bound on paths.
+var censusFatal = map[refusal]bool{rGenericDeclared: true, rPaths: true}
+
+// censusMaxAttempts bounds the attempts of one function.
+const censusMaxAttempts = 100
+
+// censusKind says how the summary counts an event of a class.
+func censusKind(class refusal) string {
+	group, _, _ := strings.Cut(string(class), ":")
+	switch {
+	case group == "assumed" || group == "declared" || group == "annotate":
+		return group
+	case group == "limit":
+		return "stop"
+	case proofClasses[class]:
+		return "proof"
+	}
+	return "cause"
+}
+
+// censusPackage reports whether a pass is of a package a census looks at.
+func censusPackage(pass *analysis.Pass, scope string) bool {
+	path := pass.Pkg.Path()
+	switch {
+	case scope == "std":
+		return (pass.Module == nil || pass.Module.Path == "") && stdPackage(path)
+	case pass.Module != nil && pass.Module.Path != "":
+		return pass.Module.Path == scope
+	}
+	// A package of GOPATH, as those of the corpus of the tests.
+	return path == scope || strings.HasPrefix(path, scope+"/")
+}
+
+// note records an event once for each class, detail, and position.
+func (cf *censusFunc) note(pv *pkgVerifier, pos token.Pos, class refusal, msg string) {
+	where := "?"
+	if pos.IsValid() {
+		at := pv.pass.Fset.Position(pos)
+		where = fmt.Sprintf("%s/%s:%d:%d", pv.pass.Pkg.Path(), filepath.Base(at.Filename), at.Line, at.Column)
+	}
+	key := string(class) + "\x00" + where
+	if cf.keys[key] {
+		return
+	}
+	cf.keys[key] = true
+	_, detail, _ := strings.Cut(string(class), "|")
+	cf.events = append(cf.events, censusEvent{Class: class.class(), Detail: detail, Pos: where, Message: msg, Kind: censusKind(refusal(class.class()))})
+}
+
+// push puts what is being executed on the stack, and returns the depth to
+// cut it back to.
+func (cf *censusFunc) push(x any) int {
+	cf.stack = append(cf.stack, x)
+	return len(cf.stack) - 1
+}
+
+// runCensus is the run of the analyzer on a package of a census.
+func (pv *pkgVerifier) runCensus(out, scope, trustPath string, looked bool) (any, error) {
+	pv.census = &censusRun{out: out, scope: scope, looked: looked, byDecl: map[*ast.FuncDecl]*censusFunc{}, assumed: map[types.Object]*funcInfo{},
+		assumedParams: map[*types.Var]bool{}}
+	node, err := logic.ParseFormula("True")
+	if err != nil {
+		panic(err)
+	}
+	pv.census.ensures = &clause{kind: "Ensures", text: "True", node: node}
+	pv.z3 = solver.Offline()
+	pv.loadTrust(trustPath)
+	pv.collect()
+	pv.noteMemory()
+	pv.noteInputs()
+	pv.checkInvariantsDeclared()
+	pv.checkGroupsInitialised()
+	pv.precheckOptional()
+	pv.checkValueInitialisers()
+	pv.exportInvariants()
+	for _, name := range pv.ownsOrder {
+		if decl := pv.ownsSource[name]; !decl.broken {
+			pv.pass.ExportObjectFact(name, &ownsFact{Fields: decl.fields})
+		}
+	}
+	pv.checkTypeContracts()
+	pv.exportTypeContracts()
+	pv.exportStates()
+	pv.pass.ExportPackageFact(&usageFact{Usage: *pv.usage})
+	if !looked {
+		return pv.usage, nil
+	}
+	for _, fn := range pv.order {
+		pv.censusLook(fn)
+	}
+	if err := pv.writeCensus(); err != nil {
+		return nil, err
+	}
+	return pv.usage, nil
+}
+
+// synthesize gives every function of the package with a body and no
+// annotations the weakest contract.
+func (pv *pkgVerifier) synthesize() {
+	for _, fn := range pv.order {
+		// A generic function is refused where it is looked at, and has no
+		// contract a call could use.
+		if fn.decl != nil && fn.decl.Body != nil && !fn.annotated() && !fn.broken && !isGeneric(fn.obj) {
+			fn.ensures = []*clause{pv.census.ensures}
+			fn.censusMade = true
+			pv.noteAssumedParams(fn)
+		}
+	}
+}
+
+// noteAssumedParams records the parameters of an unnamed function type of
+// a weakest contract.
+func (pv *pkgVerifier) noteAssumedParams(fn *funcInfo) {
+	for _, param := range fn.params {
+		if _, named := types.Unalias(param.Type()).(*types.Named); !named && isFunc(param.Type()) {
+			pv.census.assumedParams[param] = true
+		}
+	}
+}
+
+// assumedContract returns the weakest contract of a function of the module
+// that has none.
+func (pv *pkgVerifier) assumedContract(callee *types.Func) *funcInfo {
+	if fn := pv.census.assumed[callee]; fn != nil {
+		return fn
+	}
+	fn := newFuncInfo(callee)
+	fn.ensures = []*clause{pv.census.ensures}
+	fn.censusMade = true
+	pv.noteAssumedParams(fn)
+	pv.census.assumed[callee] = fn
+	return fn
+}
+
+// assumedMethod returns the weakest contract of a method of an interface
+// of the module that has none.
+func (pv *pkgVerifier) assumedMethod(method *types.Func) *funcInfo {
+	if fn := pv.census.assumed[method]; fn != nil {
+		return fn
+	}
+	fn := newFuncInfo(withoutReceiver(method))
+	fn.ensures = []*clause{pv.census.ensures}
+	fn.methodOf = method
+	fn.censusMade = true
+	pv.census.assumed[method] = fn
+	return fn
+}
+
+// assumedType returns the weakest contract of a function type of the
+// module that has none.
+func (pv *pkgVerifier) assumedType(name *types.TypeName) *funcInfo {
+	if fn := pv.census.assumed[name]; fn != nil {
+		return fn
+	}
+	sig := name.Type().Underlying().(*types.Signature)
+	fn := newFuncInfo(types.NewFunc(name.Pos(), name.Pkg(), name.Name(), sig))
+	fn.ensures = []*clause{pv.census.ensures}
+	fn.valueOf = name
+	fn.censusMade = true
+	pv.census.assumed[name] = fn
+	return fn
+}
+
+// noteAssumed records, at a use, that a contract is the weakest one the
+// census made.
+func (v *fnVerifier) noteAssumed(pos token.Pos, fn *funcInfo, class refusal, what string) {
+	if v.census != nil && fn != nil && fn.censusMade {
+		v.census.note(v.pkgVerifier, pos, withDetail(class, what), "")
+	}
+}
+
+// censusLook looks at one function, and at the recursive closures inside
+// it into the same record.
+func (pv *pkgVerifier) censusLook(fn *funcInfo) {
+	if fn.closure != nil {
+		cf := pv.census.byDecl[fn.closure.outer]
+		if cf == nil || cf.stopped {
+			return
+		}
+		pv.censusAttempts(cf, fn, (*fnVerifier).verify)
+		return
+	}
+	if fn.decl == nil || fn.decl.Body == nil {
+		return
+	}
+	cf := &censusFunc{fn: fn, keys: map[string]bool{}, seen: map[ast.Stmt]bool{}, stubs: map[any]bool{}}
+	pv.census.records = append(pv.census.records, cf)
+	pv.census.byDecl[fn.decl] = cf
+	if fn.broken {
+		cf.note(pv, fn.decl.Name.Pos(), rAnnotationBroken, "its annotations cannot be read")
+		cf.stopped = true
+		return
+	}
+	pv.censusAttempts(cf, fn, (*fnVerifier).verify)
+	pv.censusLiterals(cf, fn)
+}
+
+// censusLiterals walks each function literal of a function whose body no
+// attempt entered, from the function's entry state, until every one has
+// been entered or the census stopped.
+func (pv *pkgVerifier) censusLiterals(cf *censusFunc, fn *funcInfo) {
+	tried := map[*ast.FuncLit]bool{}
+	for !cf.stopped {
+		var next *ast.FuncLit
+		ast.Inspect(fn.decl.Body, func(n ast.Node) bool {
+			if lit, ok := n.(*ast.FuncLit); ok && next == nil && !tried[lit] && len(lit.Body.List) > 0 && !cf.seen[lit.Body.List[0]] {
+				next = lit
+			}
+			return next == nil
+		})
+		if next == nil {
+			return
+		}
+		tried[next] = true
+		pv.censusAttempts(cf, fn, func(v *fnVerifier) {
+			v.boxed = v.findBoxed(fn.decl.Body)
+			v.looped = findLooped(fn.decl.Body)
+			v.censusLiteral(next, v.enter())
+		})
+	}
+}
+
+// censusAttempts runs a task of the census in attempts until one ends
+// without a refusal that a stub can help.
+func (pv *pkgVerifier) censusAttempts(cf *censusFunc, fn *funcInfo, task func(*fnVerifier)) {
+	for attempt := 0; !cf.stopped; attempt++ {
+		if attempt == censusMaxAttempts {
+			cf.note(pv, fn.obj.Pos(), rLimitAttempts, fmt.Sprintf("more than %d refusals", censusMaxAttempts))
+			cf.stopped = true
+			return
+		}
+		if pv.censusAttempt(cf, fn, task) {
+			return
+		}
+	}
+}
+
+// censusAttempt runs one attempt, and reports whether it ended for good.
+func (pv *pkgVerifier) censusAttempt(cf *censusFunc, fn *funcInfo, task func(*fnVerifier)) (done bool) {
+	v := pv.newVerifier(fn)
+	v.census = cf
+	cf.stack, cf.at, cf.walking = nil, nil, 0
+	pv.current = fn
+	defer func() { pv.current = nil }()
+	defer pv.costing(fn)()
+	defer func() {
+		r := recover()
+		if r == nil {
+			done = true
+			return
+		}
+		done = true
+		switch r := r.(type) {
+		case unsupported:
+			cf.note(pv, r.pos, r.class, r.msg)
+			if censusFatal[refusal(r.class.class())] {
+				cf.stopped = true
+				return
+			}
+			var target any
+			for i := len(cf.at) - 1; i >= 0 && target == nil; i-- {
+				target = cf.at[i]
+			}
+			if target == nil || cf.stubs[target] {
+				cf.stopped = true
+				return
+			}
+			cf.stubs[target] = true
+			done = false
+		case logic.TooLarge:
+			cf.note(pv, fn.obj.Pos(), rFormulaLimit, "a formula built for it has grown beyond the limit")
+			cf.stopped = true
+		case abort:
+			cf.note(pv, fn.obj.Pos(), rUnreadable, "an annotation it relies on cannot be read")
+			cf.stopped = true
+		default:
+			cf.note(pv, fn.obj.Pos(), rInternal, fmt.Sprint(r))
+			cf.stopped = true
+		}
+	}()
+	task(v)
+	return true
+}
+
+// censusRefused is called where a refusal is made, before it panics: the
+// census keeps what was being executed.
+func (v *fnVerifier) censusRefused() {
+	if v.census != nil {
+		v.census.at = slices.Clone(v.census.stack)
+	}
+}
+
+// censusRefuse records a refusal that the census goes on past without a
+// panic, and reports whether it did: outside a census the caller panics.
+func (v *fnVerifier) censusRefuse(pos token.Pos, class refusal, msg string) bool {
+	if v.census == nil {
+		return false
+	}
+	v.census.note(v.pkgVerifier, pos, class, msg)
+	return true
+}
+
+// censusEval is the start of eval in a census. It returns a value for a
+// stubbed expression, and puts any other with a layout on the stack until
+// done is called.
+func (v *fnVerifier) censusEval(e ast.Expr, st *state) (val value, done func()) {
+	t := v.info.TypeOf(e)
+	if _, ok := layoutOf(t); !ok {
+		return nil, func() {}
+	}
+	if v.census.stubs[e] {
+		return v.unknown("census", t, st), nil
+	}
+	depth := v.census.push(e)
+	return nil, func() { v.census.stack = v.census.stack[:depth] }
+}
+
+// censusCheck runs a named check of verify in a census: a stubbed check is
+// left out.
+func (v *fnVerifier) censusCheck(name string, check func()) {
+	if v.census == nil {
+		check()
+		return
+	}
+	key := fmt.Sprintf("%s@%d", name, v.fn.decl.Pos())
+	if v.census.stubs[key] {
+		return
+	}
+	depth := v.census.push(key)
+	defer func() { v.census.stack = v.census.stack[:depth] }()
+	check()
+}
+
+// censusStmt is seq's dispatch of one statement in a census. A stubbed
+// statement is replaced by censusStub; any other is on the stack while its
+// own part runs, and off it while what follows it runs.
+func (v *fnVerifier) censusStmt(s ast.Stmt, st *state, c ctrl, k func(*state), run func(k func(*state))) {
+	if v.census == nil {
+		run(k)
+		return
+	}
+	v.census.seen[s] = true
+	if labeled, ok := s.(*ast.LabeledStmt); ok {
+		v.census.seen[labeled.Stmt] = true
+	}
+	if v.census.stubs[s] {
+		v.censusStub(s, st, c, k)
+		return
+	}
+	depth := v.census.push(s)
+	defer func() { v.census.stack = v.census.stack[:depth] }()
+	run(func(next *state) {
+		tail := slices.Clone(v.census.stack[depth:])
+		v.census.stack = v.census.stack[:depth]
+		defer func() { v.census.stack = append(v.census.stack[:depth], tail...) }()
+		k(next)
+	})
+}
+
+// censusStub executes a stubbed statement: the variables it assigns or
+// declares get values about which nothing is known, each body directly
+// inside it is walked once with every way out of it ending the path, and
+// the path goes on unless the statement leaves the block.
+func (v *fnVerifier) censusStub(s ast.Stmt, st *state, c ctrl, k func(*state)) {
+	v.censusForget(s, st)
+	end := func(*state) {}
+	walk := func(list []ast.Stmt, from, to token.Pos) {
+		if n := len(list); n > 0 {
+			if last, ok := list[n-1].(*ast.BranchStmt); ok && last.Tok == token.FALLTHROUGH {
+				list = list[:n-1]
+			}
+		}
+		v.census.walking++
+		defer func() { v.census.walking-- }()
+		v.seq(list, from, to, st.clone(), ctrl{brk: end, cont: end}, end)
+	}
+	var bodies func(s ast.Stmt)
+	bodies = func(s ast.Stmt) {
+		switch s := s.(type) {
+		case *ast.LabeledStmt:
+			bodies(s.Stmt)
+		case *ast.BlockStmt:
+			walk(s.List, s.Lbrace, s.Rbrace)
+		case *ast.IfStmt:
+			walk(s.Body.List, s.Body.Lbrace, s.Body.Rbrace)
+			if s.Else != nil {
+				bodies(s.Else)
+			}
+		case *ast.ForStmt:
+			walk(s.Body.List, s.Body.Lbrace, s.Body.Rbrace)
+		case *ast.RangeStmt:
+			walk(s.Body.List, s.Body.Lbrace, s.Body.Rbrace)
+		case *ast.SwitchStmt:
+			for _, clause := range s.Body.List {
+				cc := clause.(*ast.CaseClause)
+				walk(cc.Body, cc.Colon, cc.End())
+			}
+		case *ast.TypeSwitchStmt:
+			for _, clause := range s.Body.List {
+				cc := clause.(*ast.CaseClause)
+				if implicit, ok := v.info.Implicits[cc].(*types.Var); ok {
+					v.censusForgetVar(implicit, st)
+				}
+				walk(cc.Body, cc.Colon, cc.End())
+			}
+		case *ast.SelectStmt:
+			for _, clause := range s.Body.List {
+				cc := clause.(*ast.CommClause)
+				walk(cc.Body, cc.Colon, cc.End())
+			}
+		}
+	}
+	bodies(s)
+	if !leaves(s) {
+		k(st)
+	}
+}
+
+// leaves reports whether a statement never goes on to the next one.
+func leaves(s ast.Stmt) bool {
+	switch s := s.(type) {
+	case *ast.ReturnStmt, *ast.BranchStmt:
+		return true
+	case *ast.LabeledStmt:
+		return leaves(s.Stmt)
+	case *ast.ExprStmt:
+		if call, ok := ast.Unparen(s.X).(*ast.CallExpr); ok {
+			if id, ok := ast.Unparen(call.Fun).(*ast.Ident); ok && id.Name == "panic" {
+				return true
+			}
+		}
+	}
 	return false
+}
+
+// censusForget gives every local variable a statement assigns or declares,
+// outside the function literals in it, a value about which nothing is
+// known.
+func (v *fnVerifier) censusForget(s ast.Stmt, st *state) {
+	ast.Inspect(s, func(n ast.Node) bool {
+		var ids []ast.Expr
+		switch n := n.(type) {
+		case *ast.FuncLit:
+			return false
+		case *ast.AssignStmt:
+			ids = n.Lhs
+		case *ast.IncDecStmt:
+			ids = []ast.Expr{n.X}
+		case *ast.RangeStmt:
+			ids = []ast.Expr{n.Key, n.Value}
+		case *ast.ValueSpec:
+			for _, id := range n.Names {
+				ids = append(ids, id)
+			}
+		}
+		for _, e := range ids {
+			if id, ok := e.(*ast.Ident); ok && e != nil {
+				if variable, ok := v.info.ObjectOf(id).(*types.Var); ok {
+					v.censusForgetVar(variable, st)
+				}
+			}
+		}
+		return true
+	})
+}
+
+// censusForgetVar gives a local variable a value about which nothing is
+// known, or none when its type has no layout, so that its uses refuse
+// with the class of its type.
+func (v *fnVerifier) censusForgetVar(variable *types.Var, st *state) {
+	if variable.IsField() || variable.Pkg() == nil || variable.Parent() == variable.Pkg().Scope() || variable.Name() == "_" {
+		return
+	}
+	if _, ok := layoutOf(variable.Type()); !ok {
+		delete(st.vals, variable)
+		return
+	}
+	v.bind(st, variable, v.unknown(variable.Name(), variable.Type(), st))
+}
+
+// censusLiteral walks the body of a function literal that no attempt
+// entered, as madeLiteral walks a literal made into a value, under the
+// weakest contract of its own signature; what it captures is a value of
+// its type about which nothing is known.
+func (v *fnVerifier) censusLiteral(lit *ast.FuncLit, st *state) {
+	sig := v.info.TypeOf(lit).(*types.Signature)
+	fn := newFuncInfo(types.NewFunc(lit.Pos(), v.pass.Pkg, "func literal", sig))
+	fn.decl = &ast.FuncDecl{Name: &ast.Ident{NamePos: lit.Pos(), Name: "func literal"}, Type: lit.Type, Body: lit.Body}
+	fn.ensures = []*clause{v.pkgVerifier.census.ensures}
+	site := v.site(lit.Pos(), "in the function literal at %s", v.placeOf(lit.Pos()))
+	sv, entry, _ := v.subVerifier(fn, st, nil, site)
+	ast.Inspect(lit.Body, func(n ast.Node) bool {
+		id, ok := n.(*ast.Ident)
+		if !ok {
+			return true
+		}
+		variable, ok := v.info.Uses[id].(*types.Var)
+		if ok && !variable.IsField() && variable.Pkg() == v.pass.Pkg && variable.Parent() != v.pass.Pkg.Scope() &&
+			(variable.Pos() < lit.Pos() || variable.Pos() >= lit.End()) && entry.vals[variable] == nil {
+			if _, ok := layoutOf(variable.Type()); ok {
+				entry.vals[variable] = sv.unknown(variable.Name(), variable.Type(), entry)
+			}
+		}
+		return true
+	})
+	sv.looped = findLooped(lit.Body)
+	sv.censusCheck("classifyLiterals", sv.classifyLiterals)
+	sv.seq(lit.Body.List, lit.Body.Lbrace, lit.Body.Rbrace, entry, ctrl{}, func(end *state) {
+		sv.censusCheck("end", func() { sv.returned(end, nil, lit.Body.Rbrace) })
+	})
+}
+
+// censusReported records a report of a census package that refuses.
+func (pv *pkgVerifier) censusReported(pos token.Pos, class refusal, msg string) {
+	if class == rObligation || class == rAnnotationFault {
+		return
+	}
+	if fn := pv.current; fn != nil {
+		decl := fn.decl
+		if fn.closure != nil {
+			decl = fn.closure.outer
+		}
+		if cf := pv.census.byDecl[decl]; cf != nil {
+			cf.note(pv, pos, class, msg)
+		}
+	}
+}
+
+// censusLine is one line of the file a census writes: a function with what
+// stopped it.
+type censusLine struct {
+	Module     string        `json:"module"`
+	Package    string        `json:"package"`
+	Function   string        `json:"function"`
+	Pos        string        `json:"pos"`
+	Statements int           `json:"statements"`
+	Unseen     int           `json:"unseen"`
+	UnseenAt   []string      `json:"unseen_at,omitempty"`
+	Stopped    bool          `json:"stopped,omitempty"`
+	Events     []censusEvent `json:"events,omitempty"`
+}
+
+// censusOut serialises the writes of the packages of one process.
+var censusOut sync.Mutex
+
+// writeCensus appends the lines of the package to the census file.
+func (pv *pkgVerifier) writeCensus() error {
+	module := "std"
+	if pv.pass.Module != nil {
+		module = pv.pass.Module.Path
+	}
+	var text []byte
+	for _, cf := range pv.census.records {
+		statements, unseen := 0, 0
+		var unseenAt []string
+		// A statement after one that never goes on, in the same list, is
+		// one Go never reaches, and no attempt enters it (F10 of the review
+		// of F41).
+		count := func(list []ast.Stmt) {
+			reached := true
+			for _, s := range list {
+				switch s.(type) {
+				case *ast.CaseClause, *ast.CommClause:
+					// The clauses of a switch or select body, whose own
+					// statements are counted.
+					continue
+				}
+				statements++
+				if reached && !cf.seen[s] {
+					unseen++
+					if len(unseenAt) < 5 {
+						at := pv.pass.Fset.Position(s.Pos())
+						unseenAt = append(unseenAt, fmt.Sprintf("%s:%d", filepath.Base(at.Filename), at.Line))
+					}
+				}
+				reached = reached && !pv.terminates(s)
+			}
+		}
+		ast.Inspect(cf.fn.decl.Body, func(n ast.Node) bool {
+			switch n := n.(type) {
+			case *ast.BlockStmt:
+				count(n.List)
+			case *ast.CaseClause:
+				count(n.Body)
+			case *ast.CommClause:
+				count(n.Body)
+			}
+			return true
+		})
+		at := pv.pass.Fset.Position(cf.fn.decl.Name.Pos())
+		// A function is named F, and a method (T).M or (*T).M.
+		name := cf.fn.obj.Name()
+		if recv := cf.fn.obj.Type().(*types.Signature).Recv(); recv != nil {
+			name = "(" + types.TypeString(recv.Type(), types.RelativeTo(cf.fn.obj.Pkg())) + ")." + name
+		}
+		line := censusLine{Module: module, Package: pv.pass.Pkg.Path(), Function: name,
+			Pos:        fmt.Sprintf("%s/%s:%d", pv.pass.Pkg.Path(), filepath.Base(at.Filename), at.Line),
+			Statements: statements, Unseen: unseen, UnseenAt: unseenAt, Stopped: cf.stopped, Events: cf.events}
+		b, err := json.Marshal(line)
+		if err != nil {
+			return err
+		}
+		text = append(append(text, b...), '\n')
+	}
+	censusOut.Lock()
+	defer censusOut.Unlock()
+	f, err := os.OpenFile(pv.census.out, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(text); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
+}
+
+// terminates reports whether a statement is terminating, as the Go
+// specification defines it, or a call of a function whose contract says it
+// never returns.
+func (pv *pkgVerifier) terminates(s ast.Stmt) bool {
+	switch s := s.(type) {
+	case *ast.ReturnStmt:
+		return true
+	case *ast.BranchStmt:
+		return s.Tok == token.GOTO || s.Tok == token.FALLTHROUGH
+	case *ast.ExprStmt:
+		call, ok := ast.Unparen(s.X).(*ast.CallExpr)
+		if !ok {
+			return false
+		}
+		if isBuiltin(pv.info, call, "panic") {
+			return true
+		}
+		if callee := pv.calleeAt(call); callee != nil && !isGeneric(callee) {
+			return neverReturns(pv.contractOf(callee))
+		}
+	case *ast.BlockStmt:
+		return len(s.List) > 0 && pv.terminates(s.List[len(s.List)-1])
+	case *ast.IfStmt:
+		return s.Else != nil && pv.terminates(s.Body) && pv.terminates(s.Else)
+	case *ast.LabeledStmt:
+		return !breaks(s.Stmt, s.Stmt, s.Label) && pv.terminates(s.Stmt)
+	case *ast.ForStmt:
+		return s.Cond == nil && !breaks(s.Body, s, nil)
+	case *ast.SwitchStmt, *ast.TypeSwitchStmt, *ast.SelectStmt:
+		var body *ast.BlockStmt
+		switch s := s.(type) {
+		case *ast.SwitchStmt:
+			body = s.Body
+		case *ast.TypeSwitchStmt:
+			body = s.Body
+		case *ast.SelectStmt:
+			body = s.Body
+		}
+		hasDefault := false
+		for _, clause := range body.List {
+			var list []ast.Stmt
+			switch cc := clause.(type) {
+			case *ast.CaseClause:
+				list, hasDefault = cc.Body, hasDefault || cc.List == nil
+			case *ast.CommClause:
+				list, hasDefault = cc.Body, true
+			}
+			if len(list) == 0 || !pv.terminates(list[len(list)-1]) || breaks(&ast.BlockStmt{List: list}, s, nil) {
+				return false
+			}
+		}
+		return hasDefault
+	}
+	return false
+}
+
+// breaks reports whether a body holds a break that leaves the statement
+// target: one without a label outside any nested for, switch, or select,
+// or one that names target's label.
+func breaks(body ast.Node, target ast.Stmt, label *ast.Ident) bool {
+	found := false
+	var walk func(n ast.Node, nested bool)
+	walk = func(n ast.Node, nested bool) {
+		ast.Inspect(n, func(m ast.Node) bool {
+			switch m := m.(type) {
+			case *ast.FuncLit:
+				return false
+			case *ast.BranchStmt:
+				if m.Tok == token.BREAK && (m.Label == nil && !nested || m.Label != nil && label != nil && m.Label.Name == label.Name) {
+					found = true
+				}
+			case *ast.ForStmt, *ast.RangeStmt, *ast.SwitchStmt, *ast.TypeSwitchStmt, *ast.SelectStmt:
+				if m != n {
+					walk(m, true)
+					return false
+				}
+			}
+			return true
+		})
+	}
+	walk(body, false)
+	return found
 }

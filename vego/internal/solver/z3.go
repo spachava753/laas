@@ -59,6 +59,9 @@ var settings = []string{
 // It is safe for concurrent use.
 type Solver struct {
 	path string
+	// offline is set for the solver of a census, which starts no Z3; see
+	// Offline.
+	offline bool
 	// pool holds the processes; see acquire.
 	pool pool
 	// flights holds the problems being solved, by key, so that a problem
@@ -139,6 +142,12 @@ func Open(path, cache string) (*Solver, error) {
 	solvers[path+"\x00"+cache] = &solverOrError{s, err, cacheFailed}
 	return s, err
 }
+
+// Offline returns a solver that starts no Z3 and settles nothing: it
+// proves a goal that is the literal True and nothing else, and finds no
+// set of facts contradictory, so that a path a contract cut goes on. A census of vego asks it, and no result of a census
+// is a proof.
+func Offline() *Solver { return &Solver{offline: true} }
 
 // CacheDir returns the directory of the answer cache, or "" for none.
 func (s *Solver) CacheDir() string {
