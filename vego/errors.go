@@ -1095,13 +1095,7 @@ func (v *fnVerifier) unsampled(t *logic.Term) []*logic.Term {
 // the nil error, a sentinel, or another package-level variable that keeps
 // its value, which are the same for every input.
 func (v *fnVerifier) isInput(t *logic.Term) bool {
-	// Where the storage of an assigned package-level variable lies, and
-	// that of a struct variable whose address is taken, is the same in
-	// every state, as an input is: a call produces none of it (found with
-	// F40, where the always-fails check took it for what a call produced
-	// and found no input of any function that names such a variable).
-	return t == logic.NilErr() || isFixedTerm(t) || isDynTable(t) || v.inputs[t.Name] || strings.HasPrefix(t.Name, entryRegion) || strings.HasPrefix(t.Name, sampleName) ||
-		t.Op == logic.OpConst && t.Sort == logic.Ref && (strings.HasPrefix(t.Name, "varref ") || strings.HasPrefix(t.Name, boxName))
+	return t == logic.NilErr() || isFixedTerm(t) || isDynTable(t) || v.inputs[t.Name] || strings.HasPrefix(t.Name, entryRegion) || strings.HasPrefix(t.Name, sampleName)
 }
 
 // canReach reports whether there is evidence that execution can arrive at

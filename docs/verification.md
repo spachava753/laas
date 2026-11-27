@@ -1215,6 +1215,23 @@ func CountedDown(n int) (total int) {
 
 After a call, the function knows of the new value what the `Ensures` says. A loop that calls the closure forgets what its `Modifies` lists, as for any call. A closure that assigns a variable its `Modifies` does not list is reported:
 
+```go
+// @Ensures True
+func Untold() {
+	calls := 0
+	var visit func(k int)
+	// @Requires 0 <= k <= 3 And 0 <= calls And calls + k <= 10
+	// @Variant k
+	visit = func(k int) {
+		if k > 0 {
+			calls++
+			visit(k - 1)
+		}
+	}
+	visit(3)
+}
+```
+
 ```text
 vego: calls is assigned, which the closure visit may not modify; list it in a // @Modifies clause above visit = func...
 ```

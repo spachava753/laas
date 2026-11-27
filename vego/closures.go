@@ -402,6 +402,14 @@ func (pv *pkgVerifier) classifyClosure(rc *recClosure, info *types.Info) {
 				refuse(n.Pos(), "%s calls %s, another recursive closure, which is not supported yet", closureName(rc.variable), closureName(variable))
 				break
 			}
+			if bound[variable] != nil {
+				// A literal used in place runs where it is called and may
+				// assign the variables of the function around it, which the
+				// closure would not see change (F19).
+				refuse(n.Pos(), "%s calls %s, a function literal bound in %s, which a recursive closure cannot call yet; "+
+					"write what it does in the closure, or make it a recursive closure of its own", closureName(rc.variable), n.Name, rc.outer.Name.Name)
+				break
+			}
 			rc.captured = append(rc.captured, variable)
 		case *ast.AssignStmt:
 			targets = n.Lhs

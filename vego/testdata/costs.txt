@@ -2456,7 +2456,7 @@ globals	globals.RemoveLimit	2	287	0
 globals	globals.Requests	1	46	0
 globals	globals.ResetStats	6	3970	0
 globals	globals.Retry	9	6862	0
-globals	globals.RetryMaybe	10	11423	0
+globals	globals.RetryMaybe	10	11612	0
 globals	globals.Runes	8	4296	0
 globals	globals.RunesAsBytes	2	1564	0
 globals	globals.Scaler	1	111	0
@@ -5637,10 +5637,14 @@ recclosures	recclosures.ByMethod	0	0	0
 recclosures	recclosures.BySlice	0	0	0
 recclosures	recclosures.CappedAppend	19	5869	0
 recclosures	recclosures.Count	5	421	0
+recclosures	recclosures.DeferredCall	4	252	0
 recclosures	recclosures.Empty	1	46	0
 recclosures	recclosures.Exits	1	46	0
 recclosures	recclosures.Forgotten	13	5011	0
 recclosures	recclosures.FromHanded	4	4662	0
+recclosures	recclosures.Guarded	5	766	0
+recclosures	recclosures.GuardedTrue	5	491	0
+recclosures	recclosures.InPlace	4	252	0
 recclosures	recclosures.Looped	16	9607	0
 recclosures	recclosures.NewChain	4	3520	0
 recclosures	recclosures.NewIsNoneOfAll	2	1930	0
@@ -5656,12 +5660,13 @@ recclosures	recclosures.StoredField	7	2729	0
 recclosures	recclosures.Swap	11	15462	0
 recclosures	recclosures.Unlisted	5	164	0
 recclosures	recclosures.Unmeasured	2	61	0
+recclosures	recclosures.ViaBound	0	0	0
 recclosures	recclosures.Wrong	5	750	0
 recclosures	recclosures.makeChain	1	1226	0
 recclosures	recclosures.needAll	1	1519	0
 recclosures	recclosures.needOne	1	1865	0
 recclosures	recclosures.the closure add	15	8629	0
-recclosures	recclosures.the closure bump	6	1176	0
+recclosures	recclosures.the closure bump	22	3816	0
 recclosures	recclosures.the closure div	3	468	0
 recclosures	recclosures.the closure down	31	10397	0
 recclosures	recclosures.the closure f	19	5981	0

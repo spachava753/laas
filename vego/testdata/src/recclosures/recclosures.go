@@ -167,3 +167,22 @@ func FromHanded(line string) (n int) {
 	})
 	return count
 }
+
+// GuardedTrue is Guarded with a contract that holds: c is one where the
+// call ran (F17).
+//
+// @Ensures x <= 0 -> r = 0
+func GuardedTrue(x int) (r int) {
+	c := 0
+	var bump func() (ok bool)
+	// @Requires 0 <= c <= 10
+	// @Modifies c
+	// @Ensures c' = c + 1 And ok
+	bump = func() (ok bool) {
+		c++
+		return true
+	}
+	if x > 0 && bump() {
+	}
+	return c
+}

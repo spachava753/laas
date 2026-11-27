@@ -283,3 +283,77 @@ func RunThenAssert(line string) {
 	// @Assert n = 0 // want `assertion may not hold: n = 0`
 	_ = n
 }
+
+// Guarded calls the closure on the right of && only: where the call does
+// not run, c keeps its value, and where it runs, the Ensures gives the new
+// one (F17 of the review of step 1).
+//
+// @Ensures r = 0
+func Guarded(x int) (r int) {
+	c := 0
+	var bump func() (ok bool)
+	// @Requires 0 <= c <= 10
+	// @Modifies c
+	// @Ensures c' = c + 1 And ok
+	bump = func() (ok bool) {
+		c++
+		return true
+	}
+	if x > 0 && bump() {
+	}
+	return c // want `postcondition may not hold: r = 0`
+}
+
+// DeferredCall calls, in a literal deferred where it is written, a closure
+// that assigns the named result after the return (F18).
+//
+// @Ensures r = 5
+func DeferredCall() (r int) {
+	var bump func()
+	// @Requires 0 <= r <= 10
+	// @Modifies r
+	// @Ensures r' = r + 1
+	bump = func() {
+		r++
+	}
+	defer func() { bump() }()
+	return 5 // want `postcondition may not hold: r = 5`
+}
+
+// InPlace declares a closure inside a literal called where it is written,
+// which assigns a variable of the function (F18).
+//
+// @Ensures r = 0
+func InPlace() (r int) {
+	func() {
+		var bump func()
+		// @Requires 0 <= r <= 10
+		// @Modifies r
+		// @Ensures r' = r + 1
+		bump = func() {
+			r++
+		}
+		bump()
+	}()
+	return r // want `postcondition may not hold: r = 0`
+}
+
+// ViaBound calls, in a closure, a literal bound in the function around
+// it, which assigns a variable the closure cannot see change (F19).
+//
+// @Ensures True
+func ViaBound() {
+	count := 0
+	check := func() {
+		if count < 10 {
+			count++
+		}
+	}
+	var visit func()
+	// @Ensures True
+	visit = func() {
+		check() // want `cannot verify ViaBound: the closure visit calls check, a function literal bound in ViaBound, which a recursive closure cannot call yet`
+	}
+	visit()
+	check()
+}
