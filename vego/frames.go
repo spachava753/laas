@@ -15,6 +15,7 @@ import (
 
 	"github.com/spachava753/laas/vego/internal/logic"
 	"github.com/spachava753/laas/vego/internal/solver"
+	"github.com/spachava753/laas/vego/internal/spans"
 )
 
 // A frame proves that the invariants of a value still hold by showing that
@@ -1444,7 +1445,7 @@ func (v *fnVerifier) untouchedRow(known *layer, home *logic.Term) (*logic.Term, 
 			if c.isRun() {
 				continue
 			}
-			pos := logic.Add(t.lo, logic.IntLit(c.off))
+			pos := spans.ByteOf(c.region(), c.start(t.span.Base()))
 			in, more := v.rowAt(known.prev, home, t.ref, pos)
 			// What the separation of a listed footprint says of the cell,
 			// as unchanged states it where a footprint layer is read.

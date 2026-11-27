@@ -11,6 +11,7 @@ import (
 
 	"github.com/spachava753/laas/vego/internal/logic"
 	"github.com/spachava753/laas/vego/internal/solver"
+	"github.com/spachava753/laas/vego/internal/spans"
 )
 
 // memory holds what pointers, slices, and maps refer to. It is divided into
@@ -163,7 +164,7 @@ type layer struct {
 	// reading other rows needs; nil, the row is empty, as for a value whose
 	// methods write nothing behind their receiver.
 	emptied *logic.Term
-	defines func(alloc, pos *logic.Term) (*logic.Term, []*logic.Term)
+	defines func(alloc *logic.Term, pos spans.Byte) (*logic.Term, []*logic.Term)
 	// follows is set for a layer of the footprint region that a store into
 	// an owned field leaves (step 4 of ownership in source): a row that
 	// holds the owned field's cell now holds what the stored value's
@@ -174,8 +175,9 @@ type layer struct {
 // followLayer is what a store into an owned field adds to the rows that
 // hold the field's cell.
 type followLayer struct {
-	ref, pos *logic.Term
-	stored   func(alloc, pos *logic.Term) (*logic.Term, []*logic.Term)
+	ref    *logic.Term
+	pos    spans.Byte
+	stored func(alloc *logic.Term, pos spans.Byte) (*logic.Term, []*logic.Term)
 }
 
 // target is a piece of memory that may be written: a stretch of positions in
@@ -186,8 +188,10 @@ type target struct {
 	// slice the positions repeat with every element.
 	cells []cell
 	ref   *logic.Term
-	// lo and hi bound the positions; they are nil for a map.
-	lo, hi *logic.Term
+	// span is the stretch of the allocation the target covers: of bytes,
+	// or of the elements of an array (internal/spans); none for a map or
+	// a row.
+	span spans.Span
 	// single is set when the target is one struct value at lo, whose leaves
 	// can be named one by one. base, when set, is the struct value the
 	// target lies in, for the fact between struct values: the struct a
@@ -460,8 +464,8 @@ func (v *fnVerifier) unchanged(sink *state, now *logic.Term, known *layer, ref, 
 			conditions = append(conditions, logic.Ne(ref, t.ref))
 		}
 		fact := logic.Implies(logic.And(conditions...), v.same(logic.Select(now, ref), logic.Select(known.prev, ref)))
-		if (hasFootprintTarget(known.targets) || hasSourcePart(known.targets)) {
-			fact = logic.And(fact, logic.And(instances...), v.reachApart(ref, logic.IntLit(0)))
+		if hasFootprintTarget(known.targets) || hasSourcePart(known.targets) {
+			fact = logic.And(fact, logic.And(instances...), v.reachApart(ref, mapCell))
 		}
 		return fact
 	}
@@ -483,7 +487,7 @@ func (v *fnVerifier) unchanged(sink *state, now *logic.Term, known *layer, ref, 
 		case t.row && !inRowRegions(t.cells, known.key):
 			// A row of states lies in the region of states alone (S0b of
 			// F34, where a row's key stopped being a home).
-		case t.lo == nil:
+		case !t.span.Set():
 			// A map is written as a whole.
 			untouched = append(untouched, logic.Ne(ref, t.ref))
 		case t.single:
@@ -507,7 +511,7 @@ func (v *fnVerifier) unchanged(sink *state, now *logic.Term, known *layer, ref, 
 						}
 					}
 				}
-				lo, hi := c.start(t.lo), c.end(t.lo)
+				lo, hi := c.start(t.span.Base()), c.end(t.span.Base())
 				if !c.isRun() {
 					hi = logic.Add(lo, logic.IntLit(1))
 				}
@@ -518,19 +522,19 @@ func (v *fnVerifier) unchanged(sink *state, now *logic.Term, known *layer, ref, 
 				untouched = append(untouched, logic.Not(logic.And(touched...)))
 			}
 		default:
-			untouched = append(untouched, logic.Not(logic.And(logic.Eq(ref, t.ref), logic.Le(t.lo, index), logic.Lt(index, t.hi))))
+			untouched = append(untouched, logic.Not(logic.And(logic.Eq(ref, t.ref), t.span.Holds(regionOfKey(known.key), index))))
 		}
 	}
 	kept := v.same(logic.Select(logic.Select(now, ref), index), logic.Select(logic.Select(known.prev, ref), index))
 	body := logic.Implies(logic.And(untouched...), kept)
-	if (hasFootprintTarget(known.targets) || hasSourcePart(known.targets)) {
+	if hasFootprintTarget(known.targets) || hasSourcePart(known.targets) {
 		position := index
 		if isMapRegion(known.key) {
 			position = logic.IntLit(0)
 		}
 		// What the footprints and the separation say of the cell is true
 		// of every cell, so it stands beside the implication.
-		body = logic.And(logic.And(instances...), v.reachApart(ref, position), body)
+		body = logic.And(logic.And(instances...), v.reachApart(ref, spans.ByteOf(regionOfKey(known.key), position)), body)
 	}
 	if index == position {
 		return logic.Implies(existed, body)
@@ -561,7 +565,7 @@ func (v *fnVerifier) fetch(sink *state, mem memory, cells []cell, ref, at *logic
 func (v *fnVerifier) fetchIn(sink *state, mem memory, cells []cell, ref, at *logic.Term, base types.Type) value {
 	if base != nil {
 		saved := v.readBase
-		v.readBase = &structValue{t: base, ref: ref, at: at}
+		v.readBase = ptrTo(v.structAt(base, ref, at))
 		defer func() { v.readBase = saved }()
 		v.noteStruct(sink, *v.readBase)
 	}
@@ -740,7 +744,7 @@ func (v *fnVerifier) writeRun(st *state, c cell, ref, at, array *logic.Term) {
 	prev := st.mem.region(c.key, table)
 	now := v.fresh("copied "+c.key, table)
 	v.layers[now.Name] = &layer{prev: prev, bound: st.brk, key: c.key,
-		targets: []target{{cells: []cell{c}, ref: ref, lo: at, hi: c.end(at), single: true}}}
+		targets: []target{{cells: []cell{c}, ref: ref, span: spans.Bytes(at, logic.Add(at, logic.IntLit(c.off+c.run*c.unit))), single: true}}}
 	k := v.bound("k")
 	inRun := logic.And(logic.Le(logic.IntLit(0), k), logic.Lt(k, logic.IntLit(c.run)))
 	st.assume(logic.Forall(k, logic.Implies(inRun, logic.Eq(logic.Select(logic.Select(now, ref), logic.Add(start, k)), logic.Select(array, k)))))
@@ -999,10 +1003,18 @@ type written struct {
 func (t target) stretches() []stretch {
 	if !t.single {
 		var parts []stretch
-		t.regions(func(key string, _ logic.Sort) { parts = append(parts, stretch{key: key, lo: t.lo, hi: t.hi, entry: t.key}) })
+		t.regions(func(key string, _ logic.Sort) {
+			if !t.span.Set() {
+				parts = append(parts, stretch{key: key, entry: t.key})
+				return
+			}
+			if lo, hi, ok := t.span.In(regionOfKey(key)); ok {
+				parts = append(parts, stretch{key: key, lo: lo, hi: hi, entry: t.key})
+			}
+		})
 		return parts
 	}
-	return stretchesOf(t.cells, t.lo)
+	return stretchesOf(t.cells, t.span.Base())
 }
 
 // stretchesOf returns what the cells of a value stored at a position cover:
@@ -1396,9 +1408,10 @@ func (v *fnVerifier) checkWriteOr(st *state, guard []*logic.Term, w written, pos
 			var by, premises []*logic.Term
 			for _, i := range candidates {
 				if t := v.frame[i]; t.fp && t.mod != without {
-					at := position
-					if part.lo == nil || isMapRegion(part.key) {
-						at = logic.IntLit(0)
+					// The cell at its byte, as the rows count it.
+					at := mapCell
+					if part.lo != nil && !isMapRegion(part.key) {
+						at = spans.ByteOf(regionOfKey(part.key), position)
 					}
 					cell, facts := v.rowAt(t.rows, t.ref, w.ref, at)
 					by = append(by, logic.And(append(facts, cell)...))
@@ -1751,7 +1764,7 @@ func (v *fnVerifier) havoc(st *state, t target, guard []*logic.Term) {
 		if slices.ContainsFunc(cells, func(c cell) bool { return c.either != nil && c.arr == nil }) {
 			cells = bothCells(cells)
 		}
-		before := v.fetch(nil, st.mem, cells, t.ref, t.lo)
+		before := v.fetch(nil, st.mem, cells, t.ref, t.span.Base())
 		unknown := make(value, len(cells))
 		for i, c := range cells {
 			// The run of an array is one leaf, a sequence, which put
@@ -1765,9 +1778,15 @@ func (v *fnVerifier) havoc(st *state, t target, guard []*logic.Term) {
 				st.assume(logic.Implies(skipped, v.same(unknown[i], before[i])))
 			}
 		}
-		v.put(st, cells, t.ref, t.lo, unknown)
+		v.put(st, cells, t.ref, t.span.Base(), unknown)
 	default:
 		t.regions(func(key string, sort logic.Sort) {
+			// What the target holds in this region, counted as the region
+			// counts its positions.
+			lo, hi, ok := t.span.In(regionOfKey(key))
+			if !ok {
+				return
+			}
 			before := logic.Select(st.mem.region(key, logic.SeqOf(logic.SeqOf(sort))), t.ref)
 			unknown := v.fresh("written", logic.SeqOf(sort))
 			if t.part && !sort.IsSeq() {
@@ -1780,31 +1799,43 @@ func (v *fnVerifier) havoc(st *state, t target, guard []*logic.Term) {
 				// its pattern; a part is memory nothing in the caller names,
 				// so few facts read it, while a slice of the caller has
 				// facts over its elements that would.
-				hi := t.hi
 				if len(guard) > 0 {
-					hi = logic.Ite(skipped, t.lo, t.hi)
+					hi = logic.Ite(skipped, lo, hi)
 				}
 				table := logic.SeqOf(logic.SeqOf(sort))
-				ref, lo := v.apart(st, t.ref, table), v.apart(st, t.lo, table)
+				ref, lo := v.apart(st, t.ref, table), v.apart(st, lo, table)
 				hi = v.apart(st, hi, table)
 				st.mem[key] = logic.SpliceAt(st.mem.region(key, table), ref, unknown, lo, hi)
 				return
 			}
 			index := v.bound("k")
-			outside := logic.Or(skipped, logic.Lt(index, t.lo), logic.Le(t.hi, index))
+			outside := logic.Or(skipped, logic.Lt(index, lo), logic.Le(hi, index))
 			st.assume(logic.Forall(index, logic.Implies(outside, v.same(logic.Select(unknown, index), logic.Select(before, index)))))
 			st.storeRow(key, sort, t.ref, unknown)
 		})
 	}
 }
 
-// extent returns the positions a slice may reach, from its start up to the
-// end of its capacity, or the positions of the struct a pointer points to.
-func (pv *pkgVerifier) extent(val value, t types.Type) (lo, hi *logic.Term) {
+// extent returns the stretch a slice may reach, from its start up to the
+// end of its capacity, or that of what a pointer points to: the bytes of a
+// struct, of the elements of an array of other elements, and the one cell
+// of a box in the region its pointer points into (internal/spans).
+func (pv *pkgVerifier) extent(val value, t types.Type) spans.Span {
 	if object, isPointer := pointee(t); isPointer {
-		return val[1], logic.Add(val[1], logic.IntLit(pv.span(object)))
+		if _, box := isBox(object); box {
+			arr := logic.False()
+			if len(val) > 2 {
+				arr = val[2]
+			}
+			return spans.Box(val[1], arr, pv.pass.TypesSizes.Sizeof(object))
+		}
+		return spans.Bytes(val[1], logic.Add(val[1], logic.IntLit(pv.span(object))))
 	}
-	return val[1], logic.Add(val[1], logic.Mul(val[3], logic.IntLit(pv.span(elemType(t)))))
+	elem := elemType(t)
+	if isStructType(elem) {
+		return spans.Bytes(val[1], logic.Add(val[1], logic.Mul(val[3], logic.IntLit(pv.span(elem)))))
+	}
+	return spans.Elements(val[1], logic.Add(val[1], logic.Mul(val[3], logic.IntLit(pv.span(elem)))), pv.pass.TypesSizes.Sizeof(elem))
 }
 
 // separate states that two slices of one type share no element, counting
@@ -1812,11 +1843,9 @@ func (pv *pkgVerifier) extent(val value, t types.Type) (lo, hi *logic.Term) {
 // stretches of one array that do not meet, or one of them has no capacity.
 func (pv *pkgVerifier) separate(a, b value, t types.Type) *logic.Term {
 	zero := logic.IntLit(0)
-	_, endA := pv.extent(a, t)
-	_, endB := pv.extent(b, t)
 	return logic.Or(
 		logic.Lt(a[0], b[0]), logic.Lt(b[0], a[0]),
-		logic.Le(endA, b[1]), logic.Le(endB, a[1]),
+		spans.Apart(pv.extent(a, t), pv.extent(b, t)),
 		logic.Le(a[3], zero), logic.Le(b[3], zero),
 	)
 }
@@ -1851,9 +1880,22 @@ func isStructType(t types.Type) bool {
 
 // structValue is a struct value in memory: its type, its allocation, and
 // its position.
+// structAt returns the struct value of type t that lies at the byte at of
+// the allocation ref.
+func (pv *pkgVerifier) structAt(t types.Type, ref, at *logic.Term) structValue {
+	return structValue{t: t, ref: ref, at: spans.Bytes(at, logic.Add(at, logic.IntLit(pv.pass.TypesSizes.Sizeof(t))))}
+}
+
+// ptrTo returns a pointer to a copy of a struct value.
+func ptrTo(s structValue) *structValue { return &s }
+
 type structValue struct {
-	t       types.Type
-	ref, at *logic.Term
+	t   types.Type
+	ref *logic.Term
+	// at is where the struct lies in its allocation, as a stretch of its
+	// bytes: cells are counted from its base, and a position of a region
+	// is in it by its In (internal/spans).
+	at spans.Span
 }
 
 // structAt is a struct value of non-zero size that a value of a type holds:
@@ -1923,7 +1965,7 @@ func (v *fnVerifier) statePairs(sink *state, x, y structValue, all bool) {
 			if a.key != b.key {
 				continue
 			}
-			pa, pb := logic.Add(x.at, logic.IntLit(a.off)), logic.Add(y.at, logic.IntLit(b.off))
+			pa, pb := logic.Add(x.at.Base(), logic.IntLit(a.off)), logic.Add(y.at.Base(), logic.IntLit(b.off))
 			size := logic.IntLit(a.size)
 			fact := logic.Or(logic.Eq(x.ref, logic.RefLit(0)), logic.Ne(x.ref, y.ref), logic.Eq(pa, pb),
 				logic.Le(logic.Add(pa, size), pb), logic.Le(logic.Add(pb, size), pa))
@@ -1948,7 +1990,7 @@ func (v *fnVerifier) noteStruct(sink *state, s structValue) {
 	// quantifier's facts, and is not remembered: a fact about it stated
 	// on the path would name the variable out of its scope (F42; it was
 	// reached once two fields of one type shared a region).
-	bound := hasBound(s.ref) || hasBound(s.at)
+	bound := hasBound(s.ref) || hasBound(s.at.Base())
 	if sink = v.boundFacts(sink, bound); sink == nil {
 		return
 	}
@@ -2018,10 +2060,16 @@ func (v *fnVerifier) leafOnly(sink *state, s structValue, key string, ref, posit
 	if size == 0 || isBoxType(s.t) {
 		return
 	}
-	options := []*logic.Term{logic.Ne(ref, s.ref), logic.Lt(position, s.at), logic.Le(logic.Add(s.at, logic.IntLit(size)), position)}
+	// The position counts as the region counts: the elements of an array
+	// in the struct lie at their floors, each element of the run a leaf.
+	options := []*logic.Term{logic.Ne(ref, s.ref), s.at.Outside(regionOfKey(key), position)}
 	for _, c := range v.cellsOf(s.t) {
-		if c.key == key {
-			options = append(options, logic.Eq(position, logic.Add(s.at, logic.IntLit(c.off))))
+		switch {
+		case c.key != key:
+		case c.isRun():
+			options = append(options, logic.And(logic.Le(c.start(s.at.Base()), position), logic.Lt(position, c.end(s.at.Base()))))
+		default:
+			options = append(options, logic.Eq(position, c.start(s.at.Base())))
 		}
 	}
 	fact := logic.Or(options...)
@@ -2049,7 +2097,7 @@ func (v *fnVerifier) distinctStructs(sink *state, known *layer, key string, ref,
 	if v.readBase == nil {
 		return
 	}
-	if sink = v.boundFacts(sink, hasBound(v.readBase.ref) || hasBound(v.readBase.at)); sink == nil {
+	if sink = v.boundFacts(sink, hasBound(v.readBase.ref) || hasBound(v.readBase.at.Base())); sink == nil {
 		return
 	}
 	for _, t := range known.targets {
@@ -2073,9 +2121,7 @@ func (v *fnVerifier) typesApartFact(sink *state, x, y structValue) {
 	if !v.typesApart(x.t, y.t) {
 		return
 	}
-	size := func(t types.Type) *logic.Term { return logic.IntLit(v.pass.TypesSizes.Sizeof(t)) }
-	fact := logic.Or(logic.Eq(x.ref, logic.RefLit(0)), logic.Eq(y.ref, logic.RefLit(0)), logic.Ne(x.ref, y.ref),
-		logic.Le(logic.Add(x.at, size(x.t)), y.at), logic.Le(logic.Add(y.at, size(y.t)), x.at))
+	fact := logic.Or(logic.Eq(x.ref, logic.RefLit(0)), logic.Eq(y.ref, logic.RefLit(0)), logic.Ne(x.ref, y.ref), spans.Apart(x.at, y.at))
 	if note := "apart|" + fact.String(); !sink.noted[note] {
 		sink.noted[note] = true
 		sink.assume(fact)
@@ -2242,4 +2288,3 @@ func freeBound(t *logic.Term) []*logic.Term {
 	walk(t, map[string]bool{})
 	return found
 }
-

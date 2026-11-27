@@ -10,6 +10,7 @@ import (
 	"slices"
 
 	"github.com/spachava753/laas/vego/internal/logic"
+	"github.com/spachava753/laas/vego/internal/spans"
 )
 
 // site is a place in a loop that may write memory: positions of an
@@ -618,12 +619,19 @@ func (v *fnVerifier) forget(st *state, eff *effects) *state {
 		case at.mapType != nil:
 			t.ref = val[0]
 		case at.elem != nil:
-			t.ref, t.lo = val[0], val[1]
-			t.hi = logic.Add(val[1], logic.Mul(val[3], logic.IntLit(v.span(at.elem))))
+			t.ref, t.span = val[0], v.extent(val, types.NewSlice(at.elem))
 		default:
 			// The cells are counted from where the pointer points, which
 			// is where a single target starts.
-			t.ref, t.lo, t.hi, t.single = val[0], val[1], logic.Add(val[1], logic.IntLit(at.hi)), true
+			t.ref, t.span, t.single = val[0], spans.Bytes(val[1], logic.Add(val[1], logic.IntLit(at.hi))), true
+			if object, isPointer := pointee(at.root.Type()); isPointer && isBoxType(object) {
+				// The one cell of a box, in the region the pointer points
+				// into, which its #arr says: under the floor a place and an
+				// element can share a position (condition 1 of the ruling
+				// on step 3a), so covering both would forget the other.
+				t.span = v.extent(val, at.root.Type())
+				t.cells = resolveCells(t.cells, val)
+			}
 			// The struct the root points to, or the variable whose address
 			// is taken, which lies at the root's position.
 			struct_ := at.root.Type()
@@ -631,7 +639,7 @@ func (v *fnVerifier) forget(st *state, eff *effects) *state {
 				struct_ = object
 			}
 			if isStructType(struct_) {
-				t.base = &structValue{t: struct_, ref: val[0], at: val[1]}
+				t.base = ptrTo(v.structAt(struct_, val[0], val[1]))
 			}
 		}
 		t.regions(func(key string, sort logic.Sort) {

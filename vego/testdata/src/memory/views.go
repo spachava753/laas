@@ -890,19 +890,19 @@ func PassMaybeNil(p *Point) {
 	setIfPresent(p) // want `vego: setIfPresent may modify what it calls p\.X, which PassMaybeNil may not modify; list it in a // @Modifies clause`
 }
 
-// Boxed holds an array, which a slice can be a second view of. A struct
-// like that is not modelled.
+// Boxed holds an array, which a slice can be a second view of.
 type Boxed struct{ A [1]int }
 
 // ResetBoxed overwrites the struct, and with it the array that the slice
-// may be a view of.
+// may be a view of, so the claim is not proved: it is false when s is
+// p.A[:] (TestResetBoxed).
 //
 // @Requires p != nil And |s| = 1 And s[0] = 7
 // @Modifies p
 // @Ensures result = 7
-func ResetBoxed(p *Boxed, s []int) (result int) { // want `vego: cannot verify ResetBoxed: parameter p has unsupported type \*memory\.Boxed`
+func ResetBoxed(p *Boxed, s []int) (result int) {
 	*p = Boxed{}
-	return s[0]
+	return s[0] // want `vego: postcondition may not hold: result = 7`
 }
 
 // Padded has an array nobody can name, which is no obstacle.

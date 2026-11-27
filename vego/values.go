@@ -104,7 +104,11 @@ func unsupportedHint(t types.Type) string {
 	if path, holder, array := arrayField(t, map[types.Type]bool{}); path == "itself" {
 		return fmt.Sprintf("; %s is an array, and arrays are not supported yet", holder)
 	} else if path != "" {
-		return fmt.Sprintf("; %s holds an array of %s in %s, and arrays in structs are supported only for elements of one byte yet", holder, array.Underlying().(*types.Array).Elem(), path)
+		elem := array.Underlying().(*types.Array).Elem()
+		if zeroSized(elem) {
+			return fmt.Sprintf("; %s holds an array of %s in %s, whose elements take no bytes, and an array in a struct cannot have elements of size zero", holder, elem, path)
+		}
+		return fmt.Sprintf("; %s holds an array of %s in %s, and arrays in structs are supported only for elements that are numbers or booleans yet", holder, elem, path)
 	}
 	if !embedsDeclared(t) {
 		return ""

@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/spachava753/laas/vego/internal/logic"
+	"github.com/spachava753/laas/vego/internal/spans"
 )
 
 // specEnv gives meaning to the names in an annotation. In a contract, a
@@ -1743,9 +1744,7 @@ func (e *specEnv) Relation(name string, paths []logic.Path) (*logic.Term, error)
 					types.TypeString(found[0].typ.Underlying().(*types.Pointer).Elem(), types.RelativeTo(e.v.pass.Pkg)))
 			}
 		}
-		firstStart, firstEnd := e.v.extent(first, found[0].typ)
-		outerStart, outerEnd := e.v.extent(outer, found[1].typ)
-		inside := logic.And(logic.Eq(first[0], outer[0]), logic.Le(outerStart, firstStart), logic.Le(firstEnd, outerEnd))
+		inside := logic.And(logic.Eq(first[0], outer[0]), spans.Inside(e.v.extent(first, found[0].typ), e.v.extent(outer, found[1].typ)))
 		if isSlice(found[0].typ) {
 			// A slice lies in the bytes of a struct only where the struct
 			// holds an array of its elements, which Go's types allow and
@@ -2310,10 +2309,10 @@ func (v *fnVerifier) walkTarget(fn *funcInfo, m *modTarget, param *types.Var, ro
 	object, isPointer := pointee(final)
 	switch {
 	case isPointer:
-		form.cells, form.direct, form.hi = v.cellsOf(object), len(hops) == 0, v.valueSize(object)
+		form.cells, form.direct, form.hi = v.cellsOf(object), len(hops) == 0, v.span(object)
 		if !symbolic {
-			t.ref, t.lo, t.hi = cur.val[0], cur.val[1], logic.Add(cur.val[1], logic.IntLit(form.hi))
-			t.base = &structValue{t: object, ref: t.ref, at: t.lo}
+			t.ref, t.span = cur.val[0], v.extent(cur.val, final)
+			t.base = ptrTo(v.structAt(object, t.ref, t.span.Base()))
 			t.owned = v.ownedParts(sink, mem, cur.val, final, map[types.Type]bool{})
 			if len(t.owned) > 0 {
 				t.owner, t.ownerType = cur.val, final
@@ -2325,7 +2324,7 @@ func (v *fnVerifier) walkTarget(fn *funcInfo, m *modTarget, param *types.Var, ro
 		form.cells, form.elem, form.direct = v.cellsOf(elemType(final)), elemType(final), len(hops) == 0
 		if !symbolic {
 			t.ref = cur.val[0]
-			t.lo, t.hi = v.extent(cur.val, final)
+			t.span = v.extent(cur.val, final)
 		}
 	case isMap(final):
 		form.mapType, form.direct = final, len(hops) == 0
@@ -2392,9 +2391,9 @@ func (v *fnVerifier) walkTarget(fn *funcInfo, m *modTarget, param *types.Var, ro
 			form.owner, form.typ = true, types.NewPointer(final)
 		}
 		if !symbolic {
-			t.ref, t.lo, t.hi = cur.ref, logic.Add(cur.at, logic.IntLit(form.lo)), logic.Add(cur.at, logic.IntLit(form.hi))
+			t.ref, t.span = cur.ref, spans.Bytes(logic.Add(cur.at, logic.IntLit(form.lo)), logic.Add(cur.at, logic.IntLit(form.hi)))
 			if inStruct != nil && isStructType(inStruct) {
-				t.base = &structValue{t: inStruct, ref: cur.ref, at: cur.at}
+				t.base = ptrTo(v.structAt(inStruct, cur.ref, cur.at))
 			}
 			// A path that ends at an owner held by value, a field or an
 			// element, names what it owns too (F6 of the review of step 1).
@@ -2464,11 +2463,11 @@ func (v *fnVerifier) withPointerStates(list []target, sink *state) []target {
 	for _, t := range list {
 		out = append(out, t)
 		if states, ok := v.pointerStatesTarget(t); ok {
-			v.notePointerKey(sink, value{t.base.ref, t.base.at})
+			v.notePointerKey(sink, value{t.base.ref, t.base.at.Base()})
 			out = append(out, states)
 		}
 		if rows, ok := v.readerTarget(t); ok {
-			v.notePointerKey(sink, value{t.base.ref, t.base.at})
+			v.notePointerKey(sink, value{t.base.ref, t.base.at.Base()})
 			out = append(out, rows)
 		}
 	}
@@ -2607,11 +2606,16 @@ func (v *fnVerifier) singleIn(p, y reached, ps, ys string) (*logic.Term, error) 
 		return logic.And(notNil, same, logic.Eq(pv[1], y.val[1]), logic.Eq(pv[2], y.val[2])), nil
 	case isSlice(y.typ):
 		elem := elemType(y.typ)
-		lo, hi := v.extent(y.val, y.typ)
-		inside := logic.And(notNil, same, logic.Le(lo, pv[1]), logic.Lt(pv[1], hi))
+		// The pointer's position in the stretch of the slice, counted as
+		// the region it points into counts: an element at its index in an
+		// array of its type and at its floor in a run inside a struct, a
+		// place at its byte (internal/spans).
+		extent := v.extent(y.val, y.typ)
+		inElem := logic.And(notNil, same, extent.Holds(spans.Region{Elem: true, Size: v.pass.TypesSizes.Sizeof(held)}, pv[1]))
+		inPlace := logic.And(notNil, same, extent.Holds(spans.AtBytes, pv[1]))
 		if typeKey(untagged(held.Underlying())) == typeKey(untagged(elem.Underlying())) {
 			// An element of the slice.
-			return logic.And(inside, pv[2]), nil
+			return logic.And(inElem, pv[2]), nil
 		}
 		// A field of an element, which lies at a place, or an element of a
 		// byte array an element holds, at its byte position: in the slice's
@@ -2631,11 +2635,11 @@ func (v *fnVerifier) singleIn(p, y reached, ps, ys string) (*logic.Term, error) 
 		}
 		switch {
 		case place && run:
-			return inside, nil
+			return logic.Or(logic.And(inPlace, logic.Not(pv[2])), logic.And(inElem, pv[2])), nil
 		case place:
-			return logic.And(inside, logic.Not(pv[2])), nil
+			return logic.And(inPlace, logic.Not(pv[2])), nil
 		case run:
-			return logic.And(inside, pv[2]), nil
+			return logic.And(inElem, pv[2]), nil
 		}
 		return nil, fmt.Errorf("%s points to a %s and %s is a slice of %s, of which no element holds a %s that a pointer can point to, so there is nothing to state",
 			ps, types.TypeString(held, types.RelativeTo(v.pass.Pkg)), ys, types.TypeString(elem, types.RelativeTo(v.pass.Pkg)),

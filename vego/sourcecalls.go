@@ -214,15 +214,14 @@ func (v *fnVerifier) directTargets(fn *funcInfo, args map[*types.Var]value) []ta
 		case isSlice(t):
 			if cells := v.cellsOf(elemType(t)); len(cells) > 0 {
 				elem := elemType(t)
-				direct = append(direct, target{cells: cells, elem: elem, ref: val[0], lo: val[1],
-					hi: logic.Add(val[1], logic.Mul(val[3], logic.IntLit(v.span(elem))))})
+				direct = append(direct, target{cells: cells, elem: elem, ref: val[0], span: v.extent(val, t)})
 			}
 		case isMap(t):
 			direct = append(direct, target{mapType: t, ref: val[0]})
 		default:
 			if object, isPointer := pointee(t); isPointer && isStructType(object) {
 				if cells := v.cellsOf(object); len(cells) > 0 {
-					direct = append(direct, target{cells: cells, ref: val[0], lo: val[1], single: true})
+					direct = append(direct, target{cells: cells, ref: val[0], span: v.extent(val, t), single: true})
 				}
 			}
 		}
@@ -383,7 +382,7 @@ func (v *fnVerifier) untouchedBy(t target, key string, ref, index *logic.Term) *
 		return logic.True()
 	case t.key != nil:
 		return logic.True()
-	case t.lo == nil:
+	case !t.span.Set():
 		return logic.Ne(ref, t.ref)
 	case t.single:
 		var untouched []*logic.Term
@@ -391,7 +390,7 @@ func (v *fnVerifier) untouchedBy(t target, key string, ref, index *logic.Term) *
 			if c.key != key {
 				continue
 			}
-			lo, hi := c.start(t.lo), c.end(t.lo)
+			lo, hi := c.start(t.span.Base()), c.end(t.span.Base())
 			if !c.isRun() {
 				hi = logic.Add(lo, logic.IntLit(1))
 			}
@@ -401,7 +400,7 @@ func (v *fnVerifier) untouchedBy(t target, key string, ref, index *logic.Term) *
 	case strings.HasSuffix(key, countLeaf.path):
 		return logic.Ne(ref, t.ref)
 	}
-	return logic.Not(logic.And(logic.Eq(ref, t.ref), logic.Le(t.lo, index), logic.Lt(index, t.hi)))
+	return logic.Not(logic.And(logic.Eq(ref, t.ref), t.span.Holds(regionOfKey(key), index)))
 }
 
 // startCallsEpoch makes every region of memory, also one not yet in the

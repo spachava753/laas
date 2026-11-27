@@ -241,7 +241,7 @@ var refusalClasses = map[refusal]string{
 	rTypeOther:             "a value of a type the verifier has no model of, not in another class (Structs and pointers)",
 	rTypeIface:             "an interface literal that embeds a declared interface, or an interface with type parameters or the methods of error (Interfaces)",
 	rTypeArray:             "an array of anything but numbers and booleans, a slice of arrays, or an array in an interface value (Structs and pointers, What F36 left)",
-	rTypeArrayStruct:       "a struct that holds an array of elements larger than a byte, or a pointer to one (Structs and pointers, What F36 left)",
+	rTypeArrayStruct:       "a struct that holds an array of anything but numbers and booleans, or a pointer to one (Structs and pointers, What F36 left)",
 	rTypeArrayElem:         "a slice, map, or channel whose elements are arrays (Structs and pointers, What F36 left)",
 	rTypeMapKey:            "a map whose keys are not numbers, strings, or booleans, as pointers or structs (Maps, Not built yet)",
 	rPointerTo:             "a pointer to a slice, a map, a pointer, an interface value, or a function, the address of one, or new of one (item 7)",
@@ -266,7 +266,7 @@ var refusalClasses = map[refusal]string{
 	rConvOptional:          "a conversion between interfaces with the methods of an optional interface of another module (Dynamic types, Part 3)",
 	rConvErrToIface:        "an error converted to an interface other than any (Dynamic types, Not built yet)",
 	rConvIfaceType:         "a value of a type with no model converted to an interface (Interfaces)",
-	rConvIfaceArray:        "an array, or a pointer to what holds one, converted to an interface (Structs and pointers, What F36 left)",
+	rConvIfaceArray:        "an array, or a value that holds one, converted to an interface (Structs and pointers, What F36 left)",
 	rConvWrapsWriter:       "a wrapper that keeps a writer, as a *bufio.Writer, converted to an io.Writer (item 12)",
 	rConvBuffer:            "a *bytes.Buffer or *strings.Builder converted to an io.Writer without a declared memory (Sizes under a declared memory)",
 	rConvOwns:              "a value that owns memory or an interface value converted to an interface whose methods write behind it (Footprints)",
@@ -467,7 +467,7 @@ func typeClassOf(t types.Type) refusal {
 }
 
 // fieldClass is typeClass for the type of a field, where an array of
-// elements larger than a byte is not modelled (fieldLayout).
+// anything but numbers and booleans is not modelled (fieldLayout).
 func fieldClass(t types.Type) refusal {
 	if isArray(t) {
 		return withDetail(rTypeArrayStruct, t.String())

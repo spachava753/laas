@@ -6,19 +6,21 @@ import (
 	"io"
 )
 
-// A struct that holds an array of elements larger than a byte is not
-// modelled, as at the base, whatever else it holds and wherever it lies:
-// beside another struct, in a slice, inside another struct, converted,
-// owned, or handed to a callee (F1 of the design review).
+// A struct that holds an array of elements larger than a byte was not
+// modelled at the base of F36, wherever it lay: beside another struct, in a
+// slice, inside another struct, converted, owned, or handed to a callee
+// (F1 of the design review). Since step 3a of F42 it is, for arrays of
+// numbers and booleans, and these programs verify or are refused for what
+// they claim (F42, numberArray).
 
 type plain struct{ n int }
 
 // @Requires p != nil
 // @Modifies p
-// @Ensures err = nil
+// @Ensures err = nil And n = |b|
 func (p *plain) Write(b []byte) (n int, err error) {
 	p.n = 1
-	return 0, nil
+	return len(b), nil
 }
 
 type wide struct {
@@ -26,17 +28,24 @@ type wide struct {
 	arr [4]int64
 }
 
+// Beside converts a struct beside an array of int64 in one allocation:
+// the footprint of &u.t is its bytes, which hold no element of u.arr, so
+// nothing is a contradiction, and False is not proved. With F36's floor,
+// u.arr lay at 1 to 4, in the footprint's [0, 8), and leafOnly made it one
+// (the prototype of step 3a).
+//
 // @Ensures False
 func Beside() {
-	u := new(wide) // want `cannot verify Beside: u has unsupported type \*arraystructs\.wide; arraystructs\.wide holds an array of int64 in `
+	u := new(wide)
 	var w io.Writer = &u.t
 	w.Write(nil)
 	_ = u.arr[0]
-}
+} // want `vego: postcondition may not hold: False`
 
+// @Requires |ws| > 0
 // @Ensures True
 func InSliceWide(ws []wide) (r int) {
-	return int(ws[0].arr[0]) // want `cannot verify InSliceWide: ws\[0\] has unsupported type arraystructs\.wide; arraystructs\.wide holds an array of i`
+	return int(ws[0].arr[0])
 }
 
 type outer struct {
@@ -44,37 +53,40 @@ type outer struct {
 }
 
 // @Ensures True
-func Nested(o *outer) { // want `cannot verify Nested: parameter o has unsupported type \*arraystructs\.outer; arraystructs\.outer holds an array `
+func Nested(o *outer) {
 }
 
 // @Ensures True
-func Handed(w *wide) { // want `cannot verify Handed: parameter w has unsupported type \*arraystructs\.wide; arraystructs\.wide holds an array of`
+func Handed(w *wide) {
 }
 
-// An array of one byte is modelled in a struct; on 386, where an int64 is
-// aligned to four, it would lie at four, and larger elements are refused.
+// On 386, where an int64 is aligned to four, y lies at four, and its run
+// at 4 and 5, inside its bytes [4, 20).
 type aligned struct {
 	x byte
 	y [2]int64
 }
 
 // @Ensures True
-func Aligned(a *aligned) { // want `cannot verify Aligned: parameter a has unsupported type \*arraystructs\.aligned; arraystructs\.aligned holds an a`
+func Aligned(a *aligned) {
 }
 
 // A pointer to a struct with an array converted to an interface.
 //
 // @Requires b != nil
 // @Modifies b
-// @Ensures err = nil
+// @Ensures err = nil And n = |p|
 func (b *buffer) Write(p []byte) (n int, err error) {
 	b.n = 0
-	return 0, nil
+	return len(p), nil
 }
 
+// Convert converts a pointer to a struct that holds an array, whose
+// footprint is the struct with its array (F42, step 3a).
+//
 // @Ensures True
 func Convert() (w io.Writer) {
-	return &buffer{} // want `cannot verify Convert: converting a \*buffer to io\.Writer is not supported yet: what it points to holds an arra`
+	return &buffer{}
 }
 
 // Owns names a field that refers to memory, which an array is not.

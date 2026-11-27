@@ -63,18 +63,22 @@ func (v *fnVerifier) audit() {
 			key := t.cells[0].key
 			before := logic.Select(st.mem.region(key, logic.SeqOf(logic.SeqOf(sort))), t.ref)
 			// A slice passed in is filled up to its length; what lies in
-			// its capacity beyond that is left alone.
-			hi := t.hi
-			if t.param != nil {
-				hi = logic.Add(t.lo, v.entry[t.param][2])
+			// its capacity beyond that is left alone. Its elements are
+			// single values, at their positions in their region.
+			lo, hi, ok := t.span.In(t.cells[0].region())
+			if !ok {
+				continue
 			}
-			seq, content := v.filled(candidate, sort, t.lo, hi)
+			if t.param != nil {
+				hi = logic.Add(lo, v.entry[t.param][2])
+			}
+			seq, content := v.filled(candidate, sort, lo, hi)
 			index := v.bound("k")
-			outside := logic.Or(logic.Lt(index, t.lo), logic.Le(hi, index))
+			outside := logic.Or(logic.Lt(index, lo), logic.Le(hi, index))
 			st.assume(content)
 			st.assume(logic.Forall(index, logic.Implies(outside, v.same(logic.Select(seq, index), logic.Select(before, index)))))
 			st.storeRow(key, sort, t.ref, seq)
-			inRange := logic.And(logic.Le(t.lo, index), logic.Lt(index, hi))
+			inRange := logic.And(logic.Le(lo, index), logic.Lt(index, hi))
 			wellTyped = wellTyped && v.prove(st, nil, logic.Forall(index, logic.Implies(inRange, v.typeFact(logic.Select(seq, index), t.elem))))
 		}
 		results := make([]value, len(fn.results))

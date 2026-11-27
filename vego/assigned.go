@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/spachava753/laas/vego/internal/logic"
+	"github.com/spachava753/laas/vego/internal/spans"
 )
 
 // Assigned package-level variables (part 2 of package-level variables).
@@ -266,7 +267,7 @@ func (v *fnVerifier) variableTargetAny(fn *funcInfo, m *modTarget, variable *typ
 	form := shape{cells: cells, lo: lo, hi: hi}
 	whole := target{text: m.text, clause: m.clause, cells: cells, single: true}
 	if !symbolic {
-		whole.ref, whole.lo, whole.hi = ref, logic.IntLit(lo), logic.IntLit(hi)
+		whole.ref, whole.span = ref, spans.Bytes(logic.IntLit(lo), logic.IntLit(hi))
 	}
 	// And what its value refers to, as for a parameter of its type.
 	if (holdsMemory(t) || isIface(t)) && !isStructType(t) {

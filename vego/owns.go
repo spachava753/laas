@@ -2,16 +2,17 @@ package vego
 
 import (
 	"fmt"
-	"maps"
 	"go/ast"
 	"go/token"
 	"go/types"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
 
 	"github.com/spachava753/laas/vego/internal/logic"
 	"github.com/spachava753/laas/vego/internal/solver"
+	"github.com/spachava753/laas/vego/internal/spans"
 )
 
 // Ownership declared in source (F27). `// @Owns items, m` in the doc
@@ -430,9 +431,7 @@ func ownedNothing(val value, t types.Type) *logic.Term {
 func (v *fnVerifier) ownedWithin(val, cur value, t types.Type) *logic.Term {
 	switch {
 	case isSlice(t):
-		lo, hi := v.extent(val, t)
-		curLo, curHi := v.extent(cur, t)
-		return logic.And(logic.Eq(val[0], cur[0]), logic.Le(curLo, lo), logic.Le(hi, curHi))
+		return logic.And(logic.Eq(val[0], cur[0]), spans.Inside(v.extent(val, t), v.extent(cur, t)))
 	case isMap(t), isIface(t):
 		return logic.Eq(val[0], cur[0])
 	}
@@ -657,17 +656,17 @@ func (v *fnVerifier) ownedPathRoot(e ast.Expr) (*types.Var, types.Type, bool) {
 // partCells returns a test of the cells a structural part of an owner
 // refers to on entry: the array of a slice inside its stretch, a map, or a
 // struct; nil for a row.
-func partCells(t target) func(ref, position *logic.Term) *logic.Term {
+func partCells(t target) func(ref *logic.Term, position spans.Byte) *logic.Term {
 	switch {
 	case t.fp || t.row:
 		return nil
 	case t.mapType != nil:
-		return func(ref, position *logic.Term) *logic.Term {
-			return logic.And(logic.Ne(t.ref, logic.RefLit(0)), logic.Eq(ref, t.ref), logic.Eq(position, logic.IntLit(0)))
+		return func(ref *logic.Term, position spans.Byte) *logic.Term {
+			return logic.And(logic.Ne(t.ref, logic.RefLit(0)), logic.Eq(ref, t.ref), logic.Eq(position.Term(), logic.IntLit(0)))
 		}
 	}
-	return func(ref, position *logic.Term) *logic.Term {
-		return logic.And(logic.Ne(t.ref, logic.RefLit(0)), logic.Eq(ref, t.ref), logic.Le(t.lo, position), logic.Lt(position, t.hi))
+	return func(ref *logic.Term, position spans.Byte) *logic.Term {
+		return logic.And(logic.Ne(t.ref, logic.RefLit(0)), logic.Eq(ref, t.ref), t.span.HoldsByte(position))
 	}
 }
 
@@ -756,14 +755,20 @@ func (v *fnVerifier) partApartFromParams(st *state, t target, owner *types.Var) 
 			}
 		case t.fp || t.row:
 		case isSlice(ot) && t.elem != nil && types.Identical(elemType(ot), t.elem):
-			lo, hi := v.extent(val, ot)
-			fact = logic.Or(logic.Le(val[3], logic.IntLit(0)), logic.Eq(t.ref, zero), logic.Ne(val[0], t.ref), logic.Le(hi, t.lo), logic.Le(t.hi, lo))
+			fact = logic.Or(logic.Le(val[3], logic.IntLit(0)), logic.Eq(t.ref, zero), logic.Ne(val[0], t.ref), spans.Apart(t.span, v.extent(val, ot)))
 		default:
 			object, isPointer := pointee(ot)
 			if !isPointer || !isStructType(object) {
 				continue
 			}
-			inPart := logic.And(logic.Eq(val[0], t.ref), logic.Le(t.lo, val[1]), logic.Lt(val[1], t.hi))
+			// Where the pointer points, counted as the region it points
+			// into counts: a struct, or a box at a place, at its byte, and
+			// a box at an element at its position among elements.
+			inPart := logic.And(logic.Eq(val[0], t.ref), t.span.Holds(spans.AtBytes, val[1]))
+			if _, boxed := isBox(object); boxed && len(val) > 2 {
+				inElem := t.span.Holds(spans.Region{Elem: true, Size: v.pass.TypesSizes.Sizeof(object)}, val[1])
+				inPart = logic.And(logic.Eq(val[0], t.ref), logic.Ite(val[2], inElem, t.span.Holds(spans.AtBytes, val[1])))
+			}
 			// A pointer to a single value may point to a field of the part
 			// of its type, which E refuses at every call (mayLieIn), so it
 			// is assumed outside whatever the part's type (F3 of the design
@@ -986,7 +991,7 @@ func (v *fnVerifier) rawMember(mem memory, ptr value, t types.Type, index int) (
 // slice, an owned map, an owned struct with what it owns, the row of an
 // owned interface value and the states of what it holds, and the same of
 // the owners it holds by value.
-func (v *fnVerifier) ownerFootprintAt(sink *state, mem memory, ptr value, t types.Type, alloc, pos *logic.Term, seen map[types.Type]bool) (*logic.Term, []*logic.Term) {
+func (v *fnVerifier) ownerFootprintAt(sink *state, mem memory, ptr value, t types.Type, alloc *logic.Term, pos spans.Byte, seen map[types.Type]bool) (*logic.Term, []*logic.Term) {
 	object, isPointer := pointee(t)
 	if !isPointer || seen[object] {
 		return logic.False(), nil
@@ -1023,21 +1028,18 @@ func (v *fnVerifier) ownerFootprintAt(sink *state, mem memory, ptr value, t type
 // field's type refers to, as a footprint holds it: a slice's stretch, a
 // map, a struct with what it owns, an interface value's row and the
 // states of what it holds.
-func (v *fnVerifier) valueFootprintAt(sink *state, mem memory, val value, ft types.Type, alloc, pos *logic.Term, seen map[types.Type]bool) (*logic.Term, []*logic.Term) {
+func (v *fnVerifier) valueFootprintAt(sink *state, mem memory, val value, ft types.Type, alloc *logic.Term, pos spans.Byte, seen map[types.Type]bool) (*logic.Term, []*logic.Term) {
 	switch {
 	case isSlice(ft):
-		lo, hi := v.extent(val, ft)
-		return logic.And(logic.Lt(logic.IntLit(0), val[3]), logic.Eq(alloc, val[0]), logic.Le(lo, pos), logic.Lt(pos, hi)), nil
+		return logic.And(logic.Lt(logic.IntLit(0), val[3]), logic.Eq(alloc, val[0]), v.extent(val, ft).HoldsByte(pos)), nil
 	case isMap(ft):
-		return logic.And(logic.Not(isNilRef(val)), logic.Eq(alloc, val[0]), logic.Eq(pos, logic.IntLit(0))), nil
+		return logic.And(logic.Not(isNilRef(val)), logic.Eq(alloc, val[0]), logic.Eq(pos.Term(), logic.IntLit(0))), nil
 	case isIface(ft):
 		inRow, facts := v.rowAt(mem.region(footprintRegion, footprintSort), home(val[0]), alloc, pos)
 		// The states of what it holds lie at their own key (S0b of F34).
 		return logic.And(logic.Not(isNilRef(val)), logic.Or(inRow, logic.Eq(alloc, skey(val[0])))), facts
 	}
-	inner, _ := pointee(ft)
-	size := v.valueSize(inner)
-	inStruct := logic.And(logic.Eq(alloc, val[0]), logic.Le(val[1], pos), logic.Lt(pos, logic.Add(val[1], logic.IntLit(size))))
+	inStruct := logic.And(logic.Eq(alloc, val[0]), v.extent(val, ft).HoldsByte(pos))
 	owned, facts := v.ownerFootprintAt(sink, mem, val, ft, alloc, pos, seen)
 	return logic.And(logic.Not(isNilRef(val)), logic.Or(inStruct, owned)), facts
 }
@@ -1054,8 +1056,8 @@ func (v *fnVerifier) followStore(st *state, lv lvalue, val value) {
 		return
 	}
 	snapshot, ft := maps.Clone(st.mem), lv.typ
-	follow := &followLayer{ref: lv.ref, pos: logic.Add(lv.at, logic.IntLit(lv.cells[0].off)),
-		stored: func(alloc, pos *logic.Term) (*logic.Term, []*logic.Term) {
+	follow := &followLayer{ref: lv.ref, pos: spans.ByteOf(lv.cells[0].region(), lv.cells[0].start(lv.at)),
+		stored: func(alloc *logic.Term, pos spans.Byte) (*logic.Term, []*logic.Term) {
 			return v.valueFootprintAt(nil, snapshot, val, ft, alloc, pos, map[types.Type]bool{})
 		}}
 	next := v.fresh("mem'"+footprintRegion, footprintSort)

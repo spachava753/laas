@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/spachava753/laas/vego/internal/logic"
+	"github.com/spachava753/laas/vego/internal/spans"
 )
 
 // The places a value can be assigned to.
@@ -251,7 +252,7 @@ func (v *fnVerifier) lvalue(e ast.Expr, st *state, guard []*logic.Term) lvalue {
 // the fact between struct values of one type (noteStruct).
 func (v *fnVerifier) noteHolder(st *state, lv lvalue) {
 	if holder := v.holderOf(lv); holder != nil {
-		v.noteStruct(st, structValue{t: holder, ref: lv.ref, at: lv.at})
+		v.noteStruct(st, v.structAt(holder, lv.ref, lv.at))
 	}
 }
 
@@ -876,7 +877,7 @@ func (v *fnVerifier) copyInto(call *ast.CallExpr, st *state) value {
 	table := logic.SeqOf(logic.SeqOf(c.sort))
 	now := v.fresh("copied "+c.key, table)
 	v.layers[now.Name] = &layer{prev: st.mem.region(c.key, table), bound: st.brk, key: c.key,
-		targets: []target{{cells: []cell{c}, ref: dst[0], lo: at, hi: end, elem: elem}}}
+		targets: []target{{cells: []cell{c}, ref: dst[0], span: spans.Elements(at, end, c.region().Size), elem: elem}}}
 	inner := v.bound("k")
 	inside := logic.And(logic.Le(logic.IntLit(0), inner), logic.Lt(inner, n))
 	st.assume(logic.Forall(inner, logic.Implies(inside, v.same(logic.Select(logic.Select(now, dst[0]), logic.Add(at, inner)), logic.Select(copied, inner)))))

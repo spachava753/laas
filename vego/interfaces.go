@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/spachava753/laas/vego/internal/logic"
+	"github.com/spachava753/laas/vego/internal/spans"
 )
 
 // An interface value other than an error is one reference, zero exactly
@@ -80,12 +81,10 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 		v.unsupported(e.Pos(), withDetail(rConvIfaceType, from.String()), fmt.Sprintf("converting a %s to %s is not supported", from, want))
 	case holdsArrayValue(from):
 		v.unsupported(e.Pos(), rConvIfaceArray, fmt.Sprintf("converting a %s to %s is not supported: an interface value or an error cannot hold an array yet", v.shown(from), v.shown(want)))
-	case pointsToArray(from):
-		// The footprint of a converted value is the stretch of its struct
-		// in every region, which the run of an array in it would need to
-		// be told apart in (F36).
-		v.unsupported(e.Pos(), rConvIfaceArray, fmt.Sprintf("converting a %s to %s is not supported yet: what it points to holds an array, and the footprint of such a value is not modelled", v.shown(from), v.shown(want)))
 	}
+	// A pointer to a struct that holds an array converts as any other: the
+	// footprint is the stretch of its struct, whose bytes hold the run of
+	// the array at its floored positions (numberArray, leafOnly).
 	// An interface without methods can hold anything. Nothing can be done
 	// with what it holds but pass it on. Each method of any other
 	// interface is checked against its contract, for the value as it is
@@ -233,7 +232,7 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 		// writes of them is memory the function made, unless it is a
 		// pointer's.
 		keyAt(at, ghost)
-		var defines func(alloc, pos *logic.Term) (*logic.Term, []*logic.Term)
+		var defines func(alloc *logic.Term, pos spans.Byte) (*logic.Term, []*logic.Term)
 		if unseen {
 			// What a method nobody verified writes is not known, so the row
 			// of the new home is a row of which nothing is known: F18's
@@ -242,8 +241,8 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 			// review of F39). Not the structural row, which is what verified
 			// methods were shown to write.
 			row := v.fresh("unseen row", logic.SeqOf(logic.SeqOf(logic.Bool)))
-			defines = func(alloc, pos *logic.Term) (*logic.Term, []*logic.Term) {
-				return logic.Select(logic.Select(row, alloc), pos), nil
+			defines = func(alloc *logic.Term, pos spans.Byte) (*logic.Term, []*logic.Term) {
+				return logic.Select(logic.Select(row, alloc), pos.Term()), nil
 			}
 			text := types.ExprString(ast.Unparen(e))
 			v.convertedAt[held.Name] = conversion{text: text, at: e.Pos(),
@@ -262,7 +261,7 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 			// element of an array, one position (F13 of the review of
 			// step 1 of F42).
 			if object, isPointer := pointee(from); isPointer && isStructType(object) && !isBoxType(object) {
-				v.convertedStructs = append(v.convertedStructs, structValue{t: object, ref: converted[0], at: converted[1]})
+				v.convertedStructs = append(v.convertedStructs, v.structAt(object, converted[0], converted[1]))
 			}
 			text := types.ExprString(ast.Unparen(e))
 			memory := "the memory that " + text + " points to"
@@ -971,8 +970,8 @@ func (v *fnVerifier) placeFootprint(entry *state, T *funcInfo, kept value, from 
 		return
 	}
 	a, k := v.bound("a"), v.bound("k")
-	inside, facts := defines(a, k)
-	cell, more := v.rowAt(entry.mem.region(footprintRegion, footprintSort), home(v.entry[T.receiver][0]), a, k)
+	inside, facts := defines(a, spans.AnyByte(k))
+	cell, more := v.rowAt(entry.mem.region(footprintRegion, footprintSort), home(v.entry[T.receiver][0]), a, spans.AnyByte(k))
 	entry.assume(logic.Forall(a, logic.Forall(k, logic.Implies(inside, logic.And(append(append(facts, more...), cell)...)))))
 }
 

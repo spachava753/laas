@@ -268,7 +268,7 @@ func TestLayoutClasses(t *testing.T) {
 
 import "unsafe"
 
-type S struct{ a [4]int32 }
+type S struct{ a [4]string }
 type E interface{ error; M() }
 type G[T any] struct{ x T }
 
@@ -297,7 +297,7 @@ var (
 	pArrayArrays [2][2]int
 	pArrayStructs [2]struct{ x int }
 	pArrayIfaces [2]any
-	pBigStruct struct{ big [64]uint64 }
+	pBigStruct struct{ big [64]string }
 )
 
 func Generic[T any](x T, p *T) {}

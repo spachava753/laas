@@ -11,6 +11,7 @@ import (
 
 	"github.com/spachava753/laas/vego/internal/logic"
 	"github.com/spachava753/laas/vego/internal/solver"
+	"github.com/spachava753/laas/vego/internal/spans"
 )
 
 // maxBranches bounds the number of conditional branches explored in one
@@ -275,7 +276,7 @@ type fnVerifier struct {
 	// stretchClaims is rowClaims for stretches of memory, and lazyStretch
 	// makes one while a promise is resolved.
 	stretchClaims map[string][]stretchClaim
-	lazyStretch   func(ref, lo, hi *logic.Term) *logic.Term
+	lazyStretch   func(ref *logic.Term, stretch spans.Span) *logic.Term
 	// claimDefs holds what each boolean of a row or a stretch claim
 	// stands for, quantified, for the one question that looks for a
 	// contradiction in a promise: assumed only at the cells read, two

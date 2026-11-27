@@ -7,6 +7,7 @@ import (
 	"slices"
 
 	"github.com/spachava753/laas/vego/internal/logic"
+	"github.com/spachava753/laas/vego/internal/spans"
 )
 
 // States of pointers (S0b of F34).
@@ -336,8 +337,8 @@ func (pv *pkgVerifier) pointerStatesTarget(t target) (target, bool) {
 		return target{}, false
 	}
 	states := t
-	states.single, states.base, states.lo, states.hi, states.owned, states.also = false, nil, nil, nil, nil, nil
-	states.cells, states.row, states.ref, states.besideStruct = []cell{stateCell}, true, pkey(value{t.base.ref, t.base.at}), true
+	states.single, states.base, states.span, states.owned, states.also = false, nil, spans.Span{}, nil, nil
+	states.cells, states.row, states.ref, states.besideStruct = []cell{stateCell}, true, pkey(value{t.base.ref, t.base.at.Base()}), true
 	return states, true
 }
 

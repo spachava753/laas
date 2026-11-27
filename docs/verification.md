@@ -16,7 +16,7 @@ This guide shows how to write Go that `vego` can verify. Read it from top to bot
 
 `vego` never reports a function as correct when it is not. If it cannot handle a piece of Go, it reports `cannot verify` and names the construct. If it cannot find a proof, it reports `may not hold`. That means "not proved". The code may be wrong, the contract may be wrong, or both may be right and the prover needs a hint. Much of this guide is about working out which.
 
-`vego` is experimental and supports only part of Go. It does not yet support calls through interfaces whose methods have no contract (which includes the interfaces of the standard library), methods of an interface that write what the interface value holds, calls of function values whose type has no contract, generic code, goroutines, arrays of anything but numbers and booleans, arrays of elements larger than a byte inside structs, or package-level variables that are changed. [What is not supported](#what-is-not-supported) lists the main gaps. Code that does I/O usually runs into these limits. The usual approach is to verify the logic and leave the code around it unverified. [Adopting it](#adopting-it) describes how.
+`vego` is experimental and supports only part of Go. It does not yet support calls through interfaces whose methods have no contract (which includes the interfaces of the standard library), methods of an interface that write what the interface value holds, calls of function values whose type has no contract, generic code, goroutines, arrays of anything but numbers and booleans, or package-level variables that are changed. [What is not supported](#what-is-not-supported) lists the main gaps. Code that does I/O usually runs into these limits. The usual approach is to verify the logic and leave the code around it unverified. [Adopting it](#adopting-it) describes how.
 
 ## Running it
 
@@ -3310,7 +3310,7 @@ A proof obligation that stops at a limit draws a message with the note. So does 
 A frame that stops at its limit draws no message. `vego` then proves the invariant as it would without the frame. When that proof stops at its limit too, the function counts a frame and a proof obligation at the same place. For `DropThenAnswer` in [What keeps it between boundaries](#what-keeps-it-between-boundaries), in a file `kept.go`, it prints:
 
 ```text
-kept.go:153:6: vego cost of DropThenAnswer: 20 problems, 6830467 resource units, 1072916 bytes, 1.96 s
+kept.go:153:6: vego cost of DropThenAnswer: 20 problems, 6942121 resource units, 1081820 bytes, 1.96 s
 	kept.go:155:2: 2 contradiction checks stopped at a limit
 	kept.go:155:2: 1 question that names what a frame lost stopped at a limit
 	kept.go:156:1: 1 proof obligation stopped at a limit
@@ -3659,7 +3659,7 @@ func Fingerprint(data []byte) (result string) {
 
 ### Arrays in structs
 
-A struct can hold an array whose elements take one byte: `byte`, `uint8`, `int8`, or `bool`. `Modifies l` covers the array, and a write of an element changes no other field:
+A struct can hold an array of numbers or booleans of any size. `Modifies l` covers the array, and a write of an element changes no other field:
 
 ```go
 type line struct {
@@ -3707,25 +3707,45 @@ vego: precondition of Load may not hold: apart(p, l.buf)
 
 `within(s, l.buf)` says that a slice lies in the array, in the same way.
 
-A struct that holds an array of larger elements, such as `[256]int`, is not supported yet:
+An array of larger elements works the same way. A write of one count changes no other count and no other field:
 
 ```go
 type histogram struct {
 	counts [256]int
+	total  int
 }
 
-// @Requires h != nil
+// @Requires h != nil And h.counts[b] < 1000000 And h.total < 1000000
+// @Modifies h
+// @Ensures h.counts'[b] = h.counts[b] + 1 And h.total' = h.total + 1
+// @Ensures Forall k in [0, 256) : k != b -> h.counts'[k] = h.counts[k]
+func (h *histogram) Count(b byte) {
+	h.counts[b]++
+	h.total++
+}
+```
+
+A pointer to an element, such as `&h.counts[b]`, points to that element alone, and a callee that writes through it changes no other element. A pointer to such a struct converts to an interface or an error as any other pointer to a struct does, and the struct's footprint holds its arrays.
+
+A struct that holds an array of anything but numbers and booleans, such as `[2]string`, is not supported yet:
+
+```go
+type names struct {
+	list [2]string
+}
+
+// @Requires n != nil
 // @Ensures True
-func (h *histogram) Total() (n int) {
-	return 0
+func (n *names) First() (r string) {
+	return n.list[0]
 }
 ```
 
 ```text
-vego: cannot verify Total: parameter h has unsupported type *guide.histogram; guide.histogram holds an array of int in field counts, and arrays in structs are supported only for elements of one byte yet
+vego: cannot verify First: parameter n has unsupported type *guide.names; guide.names holds an array of string in field list, and arrays in structs are supported only for elements that are numbers or booleans yet
 ```
 
-Keep such an array in a local variable, or use a slice.
+Use a slice instead.
 
 ### What arrays do not support yet
 
@@ -3746,7 +3766,6 @@ vego: cannot verify Names: names has unsupported type [2]string; [2]string is an
 These are not supported yet either, each with a message that names it:
 
 - a pointer to an array, as in `p := &buf`; slice the array instead;
-- converting a pointer to a struct that holds an array to an interface or an error, as in `var w io.Writer = &line{}`;
 - reading or writing an element of a slice of arrays, as in `xs[0][0]` of a `[][4]byte`; holding such a slice, its length, and slicing it are supported;
 - an array or a value that holds one in an interface value or an error, an assertion or a type switch to such a type, and `errors.As` with such a target;
 - a function type or a method of an interface whose parameters or results hold an array;
@@ -3955,7 +3974,7 @@ The first, third, fourth, and fifth rows apply wherever the path ends. A path th
 
 To assign a field that holds a slice, pointer, map, or interface value, list the struct that contains it. A method that assigns `s.n` and writes `s.items[i]` needs `Modifies s.n, s.items`. A method that assigns `s.items` needs `Modifies s`.
 
-A struct can have a field of a type that `vego` does not support, such as a channel. Verified code cannot read or assign that field, but it is still part of the struct. Assigning the whole struct writes that field too. For a pointer `h` to such a struct, `*h = H{}` needs `Modifies h`, and entries for the other fields are not enough. A struct with a field that is an array of elements larger than a byte is the exception. It is not supported at all (see [Arrays in structs](#arrays-in-structs)).
+A struct can have a field of a type that `vego` does not support, such as a channel. Verified code cannot read or assign that field, but it is still part of the struct. Assigning the whole struct writes that field too. For a pointer `h` to such a struct, `*h = H{}` needs `Modifies h`, and entries for the other fields are not enough. A struct with a field that is an array of anything but numbers and booleans is the exception. It is not supported at all (see [Arrays in structs](#arrays-in-structs)).
 
 ### Pointers to numbers, booleans, and strings
 
@@ -11130,7 +11149,7 @@ A function that uses any of the following is reported as `cannot verify`:
 - a bound on how many times a function handed to a parameter under `calls` or `Calls` is called, so a sum or a count in a literal must be bounded in the literal (see [What the runs of a literal keep](#what-the-runs-of-a-literal-keep));
 - a call of `sort.Slice` or `sort.SliceStable` whose first argument does not have a slice type, such as an `any`, `nil`, or a pointer to an array (see [Sorting a slice of structs](#sorting-a-slice-of-structs));
 - goroutines, channels, and `select`;
-- arrays of anything but numbers and booleans, structs that contain an array of elements larger than a byte, and the other uses of arrays listed in [What arrays do not support yet](#what-arrays-do-not-support-yet);
+- arrays of anything but numbers and booleans, in a struct or not, and the other uses of arrays listed in [What arrays do not support yet](#what-arrays-do-not-support-yet);
 - pointers to anything other than a struct;
 - reading or changing a package-level variable whose address the build takes and that is not a struct, a struct variable of another package whose address is taken, a variable that a directive or an assembly file names, an error variable that something changes, or a variable whose type can hold a function value, an interface value, an error, a channel, or an `unsafe.Pointer`, but for an interface type, a named function type with a contract, and a logger made by `log.New` (see [Package-level variables](#package-level-variables));
 - `copy` of slices of anything but numbers and booleans, and `copy` inside a larger expression (see [Copying between slices](#copying-between-slices));

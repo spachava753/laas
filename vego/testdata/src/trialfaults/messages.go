@@ -11,24 +11,27 @@ func Copies(dst, src []string) {
 	copy(dst, src) // want `cannot verify Copies: copy of a slice of string is not supported yet; copy is supported for slices of numbers and booleans, and from a string into a \[\]byte; write the copy as a loop that assigns each element`
 }
 
-// encoder holds an array of elements larger than a byte.
+// encoder holds an array of strings, which a struct cannot hold yet.
 type encoder struct {
 	n   int
-	out [4]int16
+	out [4]string
 }
 
 // @Requires e != nil
 // @Ensures True
-func Encodes(e *encoder) { // want `cannot verify Encodes: parameter e has unsupported type \*trialfaults.encoder; trialfaults.encoder holds an array of int16 in field out, and arrays in structs are supported only for elements of one byte yet`
+func Encodes(e *encoder) { // want `cannot verify Encodes: parameter e has unsupported type \*trialfaults.encoder; trialfaults.encoder holds an array of string in field out, and arrays in structs are supported only for elements that are numbers or booleans yet`
 }
 
-// inner holds an array two structs down.
-type inner struct{ buf [2]int }
+// inner holds an array of elements of size zero two structs down.
+type inner struct{ buf [2]struct{} }
 
-type outer struct{ in inner }
+type outer struct {
+	in inner
+	n  int
+}
 
 // @Ensures True
-func Nested(o outer) { // want `outer holds an array of int in field in.buf, and arrays in structs are supported only for elements of one byte yet`
+func Nested(o outer) { // want `outer holds an array of struct\{\} in field in.buf, whose elements take no bytes, and an array in a struct cannot have elements of size zero`
 }
 
 func usage() {}

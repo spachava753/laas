@@ -111,12 +111,26 @@ func (l *line) Reload() {
 
 type histogram struct {
 	counts [256]int
+	total  int
 }
 
-// @Requires h != nil
+// @Requires h != nil And h.counts[b] < 1000000 And h.total < 1000000
+// @Modifies h
+// @Ensures h.counts'[b] = h.counts[b] + 1 And h.total' = h.total + 1
+// @Ensures Forall k in [0, 256) : k != b -> h.counts'[k] = h.counts[k]
+func (h *histogram) Count(b byte) {
+	h.counts[b]++
+	h.total++
+}
+
+type names struct {
+	list [2]string
+}
+
+// @Requires n != nil
 // @Ensures True
-func (h *histogram) Total() (n int) { // want `cannot verify Total: parameter h has unsupported type \*guide.histogram; guide.histogram holds an array of int in field counts, and arrays in structs are supported only for elements of one byte yet`
-	return 0
+func (n *names) First() (r string) { // want `cannot verify First: parameter n has unsupported type \*guide.names; guide.names holds an array of string in field list, and arrays in structs are supported only for elements that are numbers or booleans yet`
+	return n.list[0]
 }
 
 // @Requires 0 <= n <= |buf|

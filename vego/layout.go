@@ -2,13 +2,14 @@ package vego
 
 import (
 	"fmt"
-	"strings"
 	"go/token"
 	"go/types"
 	"slices"
+	"strings"
 	"sync"
 
 	"github.com/spachava753/laas/vego/internal/logic"
+	"github.com/spachava753/laas/vego/internal/spans"
 	"golang.org/x/tools/go/types/typeutil"
 )
 
@@ -245,17 +246,6 @@ func isBoxType(t types.Type) bool {
 	return box
 }
 
-// valueSize returns how many positions a value of the type that a pointer
-// points to covers in the stretch of the pointer's target: a struct's size
-// in bytes, and one for a box, whose one cell is counted in bytes at a
-// place and in elements in an array (F13 of the review of step 1 of F42).
-func (pv *pkgVerifier) valueSize(t types.Type) int64 {
-	if isBoxType(t) {
-		return 1
-	}
-	return pv.pass.TypesSizes.Sizeof(t)
-}
-
 // storedAs returns the type whose cells hold a variable of type t that
 // lives in memory: the box of a single value, or the type itself.
 func storedAs(t types.Type) types.Type {
@@ -396,35 +386,47 @@ func elemLayout(t types.Type) ([]leaf, bool) {
 }
 
 // fieldLayout is layoutOf for the type of a struct field. An array there is
-// modelled when its elements take one byte (byteArray), and not otherwise.
+// modelled when its elements are numbers or booleans (numberArray), and
+// not otherwise.
 func fieldLayout(t types.Type) ([]leaf, bool) {
-	if isArray(t) && !byteArray(t) {
+	if isArray(t) && !numberArray(t) {
 		return nil, false
 	}
 	return layoutOf(t)
 }
 
-// byteArray reports whether a type is an array of numbers or booleans of
-// one byte each: byte, uint8, int8, and bool, which take one byte on every
-// target. Such an array may lie in a struct: in the region of its elements
-// the position of a cell is then its byte address, as in the region of a
-// field, so every test that compares positions with the bytes a struct
-// covers holds of it. An array of larger elements lies at the floor of its
-// address over the size of an element, and those tests would have to be
-// made per region, the footprints of conversions among them (F1 of the
-// design review of F36); it is not modelled inside a struct.
-func byteArray(t types.Type) bool {
+// numberArray reports whether a type is an array of numbers or booleans:
+// integers but uintptr, floats, and booleans, of any size (F42, step 3a).
+// Such an array may lie in a struct, as a run at the floor of its address
+// over the size of an element (start): its element k at ⌊A/n⌋ + k for the
+// byte A at which it begins. A stretch of bytes meets the positions of the
+// region of its elements only through its In, which floors it
+// (internal/spans), so a test that compares the two without the floor does
+// not compile. An array of elements of size zero, as [4]struct{}, is never
+// a run: its elements would have no bytes to be counted at.
+func numberArray(t types.Type) bool {
 	array, ok := t.Underlying().(*types.Array)
-	if !ok {
+	if !ok || zeroSized(array.Elem()) {
 		return false
 	}
 	basic, ok := array.Elem().Underlying().(*types.Basic)
-	if !ok {
-		return false
-	}
-	switch basic.Kind() {
-	case types.Uint8, types.Int8, types.Bool:
+	return ok && basic.Info()&(types.IsInteger|types.IsFloat|types.IsBoolean) != 0 && basic.Kind() != types.Uintptr
+}
+
+// zeroSized reports whether a value of the type takes no bytes on any
+// target: a struct whose fields all take none, or an array of no elements
+// or of such elements.
+func zeroSized(t types.Type) bool {
+	switch u := t.Underlying().(type) {
+	case *types.Struct:
+		for field := range u.Fields() {
+			if !zeroSized(field.Type()) {
+				return false
+			}
+		}
 		return true
+	case *types.Array:
+		return u.Len() == 0 || zeroSized(u.Elem())
 	}
 	return false
 }
@@ -443,13 +445,6 @@ func holdsArrayValue(t types.Type) bool {
 		}
 	}
 	return false
-}
-
-// pointsToArray reports whether a type is a pointer to a struct that holds
-// an array by value.
-func pointsToArray(t types.Type) bool {
-	object, ok := pointee(t)
-	return ok && holdsArrayValue(object)
 }
 
 // heldReason says why an interface value or an error cannot hold a value
@@ -474,7 +469,7 @@ func heldReason(t types.Type) string {
 func holdsArray(t types.Type) bool {
 	switch u := t.Underlying().(type) {
 	case *types.Array:
-		return u.Len() != 0 && !byteArray(t)
+		return u.Len() != 0 && !numberArray(t)
 	case *types.Struct:
 		for field := range u.Fields() {
 			if field.Name() != "_" && holdsArray(field.Type()) {
@@ -548,6 +543,10 @@ type cell struct {
 	off  int64
 	run  int64
 	unit int64
+	// size is set for a cell of an elem region that is no run: the size of
+	// an element of its type, by which the region counts its positions
+	// (region).
+	size int64
 	// either is set for the cell of a box: the cell it is when the pointer
 	// to the box points to an element of an array, in the elem region of
 	// its type, at the same position. arr is that pointer's #arr once the
@@ -635,6 +634,36 @@ func (c cell) end(at *logic.Term) *logic.Term {
 	return logic.Add(c.start(at), logic.IntLit(c.run))
 }
 
+// elemSizes holds, for the key of each elem region a cell has been made
+// for, the size of its elements, by which it counts its positions. It is a
+// function of the key, since the key names the type, so every verifier
+// that reads it sees the same.
+var elemSizes sync.Map
+
+// regionOfKey says how the region of a key counts its positions.
+func regionOfKey(key string) spans.Region {
+	if !strings.HasPrefix(key, "elem ") {
+		return spans.AtBytes
+	}
+	size, ok := elemSizes.Load(key)
+	if !ok {
+		panic("vego: internal error: the region " + key + " has no cell")
+	}
+	return spans.Region{Elem: true, Size: size.(int64)}
+}
+
+// region says how the region of a cell counts its positions: in bytes, or
+// in elements of the size of its type (internal/spans).
+func (c cell) region() spans.Region {
+	switch {
+	case c.isRun():
+		return spans.Region{Elem: true, Size: c.unit}
+	case strings.HasPrefix(c.key, "elem "):
+		return spans.Region{Elem: true, Size: c.size}
+	}
+	return spans.AtBytes
+}
+
 // isRun reports whether a cell is the run of an array.
 func (c cell) isRun() bool { return c.unit > 0 }
 
@@ -657,7 +686,8 @@ func (pv *pkgVerifier) cellsOf(t types.Type) []cell {
 				// to as a *MyInt and convert to an *int.
 				key = "elem " + typeKey(untagged(t.Underlying())) + lf.path
 			}
-			cells[i] = cell{key: key, sort: lf.sort}
+			cells[i] = cell{key: key, sort: lf.sort, size: pv.pass.TypesSizes.Sizeof(t)}
+			elemSizes.LoadOrStore(key, cells[i].size)
 		}
 		return cells
 	}
@@ -706,7 +736,8 @@ func (pv *pkgVerifier) cellsOf(t types.Type) []cell {
 		for _, lf := range inner {
 			c := cell{key: key + lf.path, sort: lf.sort, off: offsets[i]}
 			if box {
-				c.either = &cell{key: "elem " + typeKey(untagged(field.Type().Underlying())) + lf.path, sort: lf.sort}
+				c.either = &cell{key: "elem " + typeKey(untagged(field.Type().Underlying())) + lf.path, sort: lf.sort, size: pv.pass.TypesSizes.Sizeof(field.Type())}
+				elemSizes.LoadOrStore(c.either.key, c.either.size)
 			}
 			cells = append(cells, c)
 		}

@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/spachava753/laas/vego/internal/logic"
+	"github.com/spachava753/laas/vego/internal/spans"
 	"gopkg.in/yaml.v3"
 )
 
@@ -250,8 +251,8 @@ func (v *fnVerifier) readerTarget(t target) (target, bool) {
 		return target{}, false
 	}
 	rows := t
-	rows.single, rows.base, rows.lo, rows.hi, rows.owned, rows.also = false, nil, nil, nil, nil, nil
-	rows.cells, rows.row, rows.ref, rows.besideStruct = []cell{unreadCell, endsCell}, true, pkey(value{t.base.ref, t.base.at}), true
+	rows.single, rows.base, rows.span, rows.owned, rows.also = false, nil, spans.Span{}, nil, nil
+	rows.cells, rows.row, rows.ref, rows.besideStruct = []cell{unreadCell, endsCell}, true, pkey(value{t.base.ref, t.base.at.Base()}), true
 	return rows, true
 }
 

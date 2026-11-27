@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/spachava753/laas/vego/internal/logic"
+	"github.com/spachava753/laas/vego/internal/spans"
 )
 
 // A state of an interface value, such as whether the value has been
@@ -576,7 +577,7 @@ func (v *fnVerifier) statesOutside(rows *logic.Term, a, b value, at, bt types.Ty
 			key, states = pkey(y), v.pointerStates(typs[pair[1]])
 		}
 		for _, s := range states {
-			cell, facts := v.rowAt(rows, home(x[0]), key, s.position())
+			cell, facts := v.rowAt(rows, home(x[0]), key, spans.ByteOf(spans.AtBytes, s.position()))
 			premises = append(premises, facts...)
 			claims = append(claims, logic.Or(isNilRef(x), isNilRef(y), logic.Not(cell)))
 		}

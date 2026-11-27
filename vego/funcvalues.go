@@ -303,12 +303,12 @@ func (v *fnVerifier) canBeMet(entry *state) bool {
 		if len(cells) != len(out) {
 			out = append(out, v.unknown("out", covered, st)...)
 		}
-		v.put(st, cells, t.ref, t.lo, out)
+		v.put(st, cells, t.ref, t.span.Base(), out)
 		// The states of what a pointer of a type with states points to,
 		// which the entry covers with the struct, get values that Z3
 		// chooses too (S0b of F34).
 		if states, ok := v.pointerStatesTarget(t); ok {
-			v.notePointerKey(st, value{t.base.ref, t.base.at})
+			v.notePointerKey(st, value{t.base.ref, t.base.at.Base()})
 			for _, state := range v.pointerStates(types.NewPointer(covered)) {
 				v.put(st, []cell{stateCell}, states.ref, state.position(), value{v.fresh("out", logic.Bool)})
 			}

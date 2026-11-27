@@ -11,6 +11,7 @@ import (
 
 	"github.com/spachava753/laas/vego/internal/logic"
 	"github.com/spachava753/laas/vego/internal/solver"
+	"github.com/spachava753/laas/vego/internal/spans"
 )
 
 // The footprint of an interface value is the memory that the methods of
@@ -45,6 +46,10 @@ import (
 // as before; and a call writes the states of its receiver only through
 // such a method (F7 (a) of the design review): Write of an io.WriteCloser,
 // declared on io.Writer, keeps closed.
+
+// mapCell is the byte at which the rows count the cell of a map, which is
+// the map as a whole.
+var mapCell = spans.ByteOf(spans.AtBytes, logic.IntLit(0))
 
 // footprintRegion is the ghost region of footprints.
 const footprintRegion = "footprint"
@@ -177,7 +182,8 @@ func (v *fnVerifier) grow(st *state, bound, skipped *logic.Term) *layer {
 // The facts are about the cell alone, so they need no quantifier; alloc
 // and pos may be bound variables, and the facts are then true for every
 // value of them, to be conjoined inside the quantifier.
-func (v *fnVerifier) rowAt(rows, home, alloc, pos *logic.Term) (*logic.Term, []*logic.Term) {
+func (v *fnVerifier) rowAt(rows, home, alloc *logic.Term, cell spans.Byte) (*logic.Term, []*logic.Term) {
+	pos := cell.Term()
 	cellOf := func(t *logic.Term) *logic.Term {
 		return logic.Select(logic.Select(logic.Select(t, home), alloc), pos)
 	}
@@ -193,7 +199,7 @@ func (v *fnVerifier) rowAt(rows, home, alloc, pos *logic.Term) (*logic.Term, []*
 		// What a callee promised of a stretch of memory, at this cell: it
 		// lies in the row of one of the values it named.
 		for _, claim := range v.stretchClaims[at.Name] {
-			held := logic.And(claim.holds, logic.Eq(alloc, claim.ref), logic.Le(claim.lo, pos), logic.Lt(pos, claim.hi))
+			held := logic.And(claim.holds, logic.Eq(alloc, claim.ref), claim.span.HoldsByte(cell))
 			var options []*logic.Term
 			for _, y := range claim.ys {
 				options = append(options, logic.And(logic.Not(isNilRef(y.val)), logic.Select(logic.Select(logic.Select(at, logic.Select(homes, y.val[0])), alloc), pos)))
@@ -203,7 +209,7 @@ func (v *fnVerifier) rowAt(rows, home, alloc, pos *logic.Term) (*logic.Term, []*
 		// What a callee promised of a row in this region, at this cell.
 		for _, claim := range v.rowClaims[at.Name] {
 			held := logic.And(claim.holds, logic.Eq(home, claim.home), cellOf(at))
-			options, known := v.newOrInParts(alloc, pos, claim.before, claim.ys, claim.yRows)
+			options, known := v.newOrInParts(alloc, cell, claim.before, claim.ys, claim.yRows)
 			facts = append(facts, logic.Implies(held, options))
 			facts = append(facts, known...)
 		}
@@ -222,7 +228,7 @@ func (v *fnVerifier) rowAt(rows, home, alloc, pos *logic.Term) (*logic.Term, []*
 			// stored there: the row of a converted owner grows with it.
 			known := v.layers[at.Name]
 			holds, more := v.rowAt(known.prev, home, known.follows.ref, known.follows.pos)
-			stored, more2 := known.follows.stored(alloc, pos)
+			stored, more2 := known.follows.stored(alloc, cell)
 			facts = append(facts, more...)
 			facts = append(facts, more2...)
 			facts = append(facts, logic.Iff(cellOf(at), logic.Or(cellOf(known.prev), logic.And(holds, stored))))
@@ -232,7 +238,7 @@ func (v *fnVerifier) rowAt(rows, home, alloc, pos *logic.Term) (*logic.Term, []*
 			defined := logic.False()
 			if known.defines != nil {
 				var more []*logic.Term
-				defined, more = known.defines(alloc, pos)
+				defined, more = known.defines(alloc, cell)
 				facts = append(facts, more...)
 			}
 			facts = append(facts, logic.Implies(logic.Eq(home, known.emptied), logic.Iff(cellOf(at), defined)),
@@ -372,7 +378,7 @@ func (v *fnVerifier) outsideFootprint(t target, key string, ref, position *logic
 		}
 		return kept, nil
 	}
-	cell, facts := v.rowAt(t.rows, t.ref, ref, position)
+	cell, facts := v.rowAt(t.rows, t.ref, ref, spans.ByteOf(regionOfKey(key), position))
 	conditions := []*logic.Term{logic.Not(cell)}
 	// A nil interface value has no footprint: none of its methods can run.
 	if t.ref.Op == logic.OpSelect && t.ref.Args[0] == homes {
@@ -430,8 +436,8 @@ type separation struct {
 	// are reached as the other parameters are; and cuts are the owned
 	// cells of the owner's struct and of the structs it owns, whose
 	// contents the reach does not follow, since they are the parts.
-	contains func(ref, position *logic.Term) *logic.Term
-	parts    []func(ref, position *logic.Term) *logic.Term
+	contains func(ref *logic.Term, at spans.Byte) *logic.Term
+	parts    []func(ref *logic.Term, at spans.Byte) *logic.Term
 	cuts     [][2]*logic.Term
 	// reachable holds the types, by typeKey, that the other parameters
 	// reach; see reachesType.
@@ -483,8 +489,8 @@ type passedValue struct {
 
 // reachedAt states that a cell is reached: a parameter refers to it
 // directly, or rel holds of it.
-func (r separation) reachedAt(v *fnVerifier, ref, position *logic.Term) *logic.Term {
-	cases := []*logic.Term{logic.Select(logic.Select(r.rel, ref), position)}
+func (r separation) reachedAt(v *fnVerifier, ref *logic.Term, position spans.Byte) *logic.Term {
+	cases := []*logic.Term{logic.Select(logic.Select(r.rel, ref), position.Term())}
 	for _, d := range r.direct {
 		cases = append(cases, v.directlyAt(d.val, d.t, ref, position))
 	}
@@ -498,25 +504,25 @@ func (r separation) reachedAt(v *fnVerifier, ref, position *logic.Term) *logic.T
 // cell lies in the struct a pointer points to, in the array of a slice from
 // its start to its capacity, or is the cell of a map, or a field of a
 // struct does.
-func (v *fnVerifier) directlyAt(val value, t types.Type, ref, position *logic.Term) *logic.Term {
+func (v *fnVerifier) directlyAt(val value, t types.Type, ref *logic.Term, position spans.Byte) *logic.Term {
 	zero := logic.RefLit(0)
-	inRange := func(at, lo, hi *logic.Term) *logic.Term {
-		return logic.And(logic.Ne(at, zero), logic.Eq(ref, at), logic.Le(lo, position), logic.Lt(position, hi))
+	inRange := func(at *logic.Term, stretch spans.Span) *logic.Term {
+		return logic.And(logic.Ne(at, zero), logic.Eq(ref, at), stretch.HoldsByte(position))
 	}
 	if object, isPointer := pointee(t); isPointer {
 		// A hidden field is not reached through the struct that holds it
 		// (scoped.go): code that is not verified writes it.
-		in := inRange(val[0], val[1], logic.Add(val[1], logic.IntLit(v.span(object))))
+		in := inRange(val[0], v.extent(val, t))
 		for _, off := range v.hiddenOffsets(object) {
-			in = logic.And(in, logic.Ne(position, logic.Add(val[1], logic.IntLit(off))))
+			in = logic.And(in, logic.Ne(position.Term(), logic.Add(val[1], logic.IntLit(off))))
 		}
 		return in
 	}
 	switch u := t.Underlying().(type) {
 	case *types.Slice:
-		return inRange(val[0], val[1], logic.Add(val[1], logic.Mul(val[3], logic.IntLit(v.span(u.Elem())))))
+		return inRange(val[0], v.extent(val, t))
 	case *types.Map:
-		return logic.And(logic.Ne(val[0], zero), logic.Eq(ref, val[0]), logic.Eq(position, logic.IntLit(0)))
+		return logic.And(logic.Ne(val[0], zero), logic.Eq(ref, val[0]), logic.Eq(position.Term(), logic.IntLit(0)))
 	case *types.Struct:
 		var cases []*logic.Term
 		for i := range u.NumFields() {
@@ -534,7 +540,7 @@ func (v *fnVerifier) directlyAt(val value, t types.Type, ref, position *logic.Te
 
 // reachApart states, at one cell, what the separation of every listed
 // footprint parameter says there.
-func (v *fnVerifier) reachApart(ref, position *logic.Term) *logic.Term {
+func (v *fnVerifier) reachApart(ref *logic.Term, position spans.Byte) *logic.Term {
 	var facts []*logic.Term
 	for _, r := range v.reaches {
 		reached := r.reachedAt(v, ref, position)
@@ -567,11 +573,12 @@ func (v *fnVerifier) checkFootprintWrite(st *state, guard []*logic.Term, t targe
 	// that Modifies c lists. A map it lists whole covers the map.
 	var candidates []int
 	for i, f := range v.frame {
-		if f.fp || (!f.row && f.ref != nil && (f.mapType != nil && f.key == nil || f.mapType == nil && f.lo != nil && f.hi != nil)) {
+		if f.fp || (!f.row && f.ref != nil && (f.mapType != nil && f.key == nil || f.mapType == nil && f.span.Set())) {
 			candidates = append(candidates, i)
 		}
 	}
-	alloc, position := v.fresh("cell", logic.Ref), v.fresh("at", logic.Int)
+	// The cell is any byte of any allocation, as the rows count it.
+	alloc, position := v.fresh("cell", logic.Ref), spans.AnyByte(v.fresh("at", logic.Int))
 	probe := st.clone()
 	cell, facts := v.rowAt(t.rows, t.ref, alloc, position)
 	framed := make([]*logic.Term, len(v.frame))
@@ -583,9 +590,9 @@ func (v *fnVerifier) checkFootprintWrite(st *state, guard []*logic.Term, t targe
 			framed[i], more = v.rowAt(f.rows, f.ref, alloc, position)
 			facts = append(facts, more...)
 		case f.mapType != nil:
-			framed[i] = logic.And(logic.Eq(alloc, f.ref), logic.Eq(position, logic.IntLit(0)))
+			framed[i] = logic.And(logic.Eq(alloc, f.ref), logic.Eq(position.Term(), logic.IntLit(0)))
 		default:
-			framed[i] = logic.And(logic.Eq(alloc, f.ref), logic.Le(f.lo, position), logic.Lt(position, f.hi))
+			framed[i] = logic.And(logic.Eq(alloc, f.ref), f.span.HoldsByte(position))
 		}
 	}
 	for _, fact := range facts {
@@ -648,7 +655,7 @@ func (v *fnVerifier) checkFootprintWrite(st *state, guard []*logic.Term, t targe
 // a loop ranges over a map does not write that map.
 func (v *fnVerifier) checkFootprintRanged(st *state, guard []*logic.Term, t target, pos token.Pos, name string) {
 	for _, r := range v.ranges {
-		cell, facts := v.rowAt(t.rows, t.ref, r.walk.ref, logic.IntLit(0))
+		cell, facts := v.rowAt(t.rows, t.ref, r.walk.ref, spans.ByteOf(spans.AtBytes, logic.IntLit(0)))
 		for _, fact := range facts {
 			st.assume(fact)
 		}
@@ -664,9 +671,11 @@ func (v *fnVerifier) checkFootprintRanged(st *state, guard []*logic.Term, t targ
 // of the fields of a struct.
 func (v *fnVerifier) reachedBy(rel *logic.Term, val value, t types.Type) *logic.Term {
 	zero := logic.RefLit(0)
-	inRange := func(ref, lo, hi *logic.Term, skip ...int64) *logic.Term {
+	// The reach counts bytes, as the rows do (internal/spans).
+	inRange := func(ref *logic.Term, stretch spans.Span, skip ...int64) *logic.Term {
 		j := v.bound("k")
 		cellOf := logic.Select(logic.Select(rel, ref), j)
+		lo, hi := stretch.ByteBounds()
 		in := logic.And(logic.Le(lo, j), logic.Lt(j, hi))
 		for _, off := range skip {
 			in = logic.And(in, logic.Ne(j, logic.Add(lo, logic.IntLit(off))))
@@ -675,11 +684,11 @@ func (v *fnVerifier) reachedBy(rel *logic.Term, val value, t types.Type) *logic.
 	}
 	if object, isPointer := pointee(t); isPointer {
 		// A hidden field is not reached through its struct (scoped.go).
-		return inRange(val[0], val[1], logic.Add(val[1], logic.IntLit(v.span(object))), v.hiddenOffsets(object)...)
+		return inRange(val[0], v.extent(val, t), v.hiddenOffsets(object)...)
 	}
 	switch u := t.Underlying().(type) {
 	case *types.Slice:
-		return inRange(val[0], val[1], logic.Add(val[1], logic.Mul(val[3], logic.IntLit(v.span(u.Elem())))))
+		return inRange(val[0], v.extent(val, t))
 	case *types.Map:
 		return logic.Implies(logic.Ne(val[0], zero), logic.Select(logic.Select(rel, val[0]), logic.IntLit(0)))
 	case *types.Struct:
@@ -816,7 +825,8 @@ func (v *fnVerifier) noteReached(sink *state, cells []cell, ref, at *logic.Term,
 		}
 		entry[i] = logic.Select(logic.Select(region, ref), logic.Add(at, logic.IntLit(c.off)))
 	}
-	holder := logic.Add(at, logic.IntLit(cells[0].off))
+	// The cell that holds the value, at its byte, as the reach counts.
+	holder := spans.ByteOf(cells[0].region(), cells[0].start(at))
 	for _, r := range v.reaches {
 		// A cell holding a t, in a value of the container's type, is
 		// reached only if both can be reached from the other parameters
@@ -831,7 +841,7 @@ func (v *fnVerifier) noteReached(sink *state, cells []cell, ref, at *logic.Term,
 		if len(r.cuts) > 0 {
 			var cut []*logic.Term
 			for _, c := range r.cuts {
-				cut = append(cut, logic.And(logic.Eq(ref, c[0]), logic.Eq(holder, c[1])))
+				cut = append(cut, logic.And(logic.Eq(ref, c[0]), logic.Eq(holder.Term(), c[1])))
 			}
 			reached = logic.And(reached, logic.Not(logic.Or(cut...)))
 		}
@@ -860,7 +870,7 @@ func (v *fnVerifier) noteReachedValue(sink *state, t types.Type, ref, key *logic
 		if !r.reachesType(elem) {
 			continue
 		}
-		fact := logic.Implies(r.reachedAt(v, ref, logic.IntLit(0)), v.reachedBy(r.rel, entry, elem))
+		fact := logic.Implies(r.reachedAt(v, ref, spans.ByteOf(spans.AtBytes, logic.IntLit(0))), v.reachedBy(r.rel, entry, elem))
 		if note := "reached " + fact.String(); !sink.noted[note] {
 			sink.noted[note] = true
 			sink.assume(fact)
@@ -1091,8 +1101,7 @@ func (v *fnVerifier) ownedParts(sink *state, mem memory, ptr value, t types.Type
 		first := len(parts)
 		switch {
 		case isSlice(ft):
-			lo, hi := v.extent(val, ft)
-			parts = append(parts, target{cells: v.cellsOf(elemType(ft)), elem: elemType(ft), ref: val[0], lo: lo, hi: hi})
+			parts = append(parts, target{cells: v.cellsOf(elemType(ft)), elem: elemType(ft), ref: val[0], span: v.extent(val, ft)})
 		case isMap(ft):
 			parts = append(parts, target{mapType: ft, ref: val[0]})
 		case isIface(ft):
@@ -1107,9 +1116,8 @@ func (v *fnVerifier) ownedParts(sink *state, mem memory, ptr value, t types.Type
 			}
 		default:
 			inner, _ := pointee(ft)
-			size := v.valueSize(inner)
-			parts = append(parts, target{cells: v.cellsOf(inner), ref: val[0], lo: val[1], hi: logic.Add(val[1], logic.IntLit(size)), single: true,
-				base: &structValue{t: inner, ref: val[0], at: val[1]}})
+			parts = append(parts, target{cells: v.cellsOf(inner), ref: val[0], span: v.extent(val, ft), single: true,
+				base: ptrTo(v.structAt(inner, val[0], val[1]))})
 		}
 		for i := first; i < len(parts); i++ {
 			parts[i].sourcePart = source
@@ -1253,9 +1261,7 @@ func (v *fnVerifier) ownerGrowthSeen(sink *state, before, after memory, ptr valu
 		}
 		switch {
 		case isSlice(ft):
-			oldLo, oldHi := v.extent(old, ft)
-			nowLo, nowHi := v.extent(now, ft)
-			within := logic.And(logic.Eq(now[0], old[0]), logic.Le(oldLo, nowLo), logic.Le(nowHi, oldHi))
+			within := logic.And(logic.Eq(now[0], old[0]), spans.Inside(v.extent(now, ft), v.extent(old, ft)))
 			facts = append(facts, logic.Or(logic.Le(now[3], logic.IntLit(0)), logic.Le(bound, now[0]), within))
 		case isMap(ft):
 			facts = append(facts, logic.Or(logic.Eq(now[0], zero), logic.Eq(now[0], old[0]), logic.Le(bound, now[0])))
@@ -1297,26 +1303,27 @@ func (v *fnVerifier) freshOf(sink *state, x reached, mem memory, before *logic.T
 		return claim
 	}
 	yRows := yMem.region(footprintRegion, footprintSort)
-	newOrIn := func(alloc, pos *logic.Term) *logic.Term {
+	newOrIn := func(alloc *logic.Term, pos spans.Byte) *logic.Term {
 		return v.newOrIn(alloc, pos, before, ys, yRows)
 	}
-	inFootprints := func(alloc, pos *logic.Term) *logic.Term {
+	inFootprints := func(alloc *logic.Term, pos spans.Byte) *logic.Term {
 		return v.newOrIn(alloc, pos, nil, ys, yRows)
 	}
 	// Assumed, a stretch's claim is stated where the rows of ys are read
 	// at a cell of it, as a row's claim is (rowNewOrIn).
 	if v.lazyRows && yRows.Op == logic.OpConst {
 		saved := v.lazyStretch
-		v.lazyStretch = func(ref, lo, hi *logic.Term) *logic.Term {
+		v.lazyStretch = func(ref *logic.Term, stretch spans.Span) *logic.Term {
 			holds := v.fresh("stretchclaim", logic.Bool)
 			k := v.bound("k")
-			v.claimDefs = append(v.claimDefs, logic.Iff(holds, logic.Forall(k, logic.Implies(logic.And(logic.Le(lo, k), logic.Lt(k, hi)), inFootprints(ref, k)))))
-			v.stretchClaims[yRows.Name] = append(v.stretchClaims[yRows.Name], stretchClaim{holds: holds, ref: ref, lo: lo, hi: hi, ys: ys})
+			lo, hi := stretch.ByteBounds()
+			v.claimDefs = append(v.claimDefs, logic.Iff(holds, logic.Forall(k, logic.Implies(logic.And(logic.Le(lo, k), logic.Lt(k, hi)), inFootprints(ref, spans.AnyByte(k))))))
+			v.stretchClaims[yRows.Name] = append(v.stretchClaims[yRows.Name], stretchClaim{holds: holds, ref: ref, span: stretch, ys: ys})
 			// The claim at the first cell of the stretch, so that an old
 			// allocation is refuted where the rows of ys are known to be
 			// empty, as those of a converted file are; what rowAt says of
 			// that cell is true, and is assumed.
-			first, known := v.newOrInParts(ref, lo, nil, ys, yRows)
+			first, known := v.newOrInParts(ref, stretch.First(), nil, ys, yRows)
 			if sink != nil {
 				for _, fact := range known {
 					sink.assume(fact)
@@ -1330,13 +1337,11 @@ func (v *fnVerifier) freshOf(sink *state, x reached, mem memory, before *logic.T
 	case isIface(x.typ):
 		return logic.Or(isNilRef(x.val), logic.And(logic.Le(before, home(x.val[0])), logic.Le(before, skey(x.val[0])), v.rowNewOrIn(mem, home(x.val[0]), before, ys, yRows)))
 	case isMap(x.typ):
-		return logic.And(logic.Not(isNilRef(x.val)), newOrIn(x.val[0], logic.IntLit(0)))
+		return logic.And(logic.Not(isNilRef(x.val)), newOrIn(x.val[0], mapCell))
 	case isSlice(x.typ):
-		lo, hi := v.extent(x.val, x.typ)
-		return logic.Or(logic.Le(x.val[3], logic.IntLit(0)), v.stretchNewOrIn(x.val[0], lo, hi, before, inFootprints))
+		return logic.Or(logic.Le(x.val[3], logic.IntLit(0)), v.stretchNewOrIn(x.val[0], v.extent(x.val, x.typ), before, inFootprints))
 	}
-	lo, hi := v.extent(x.val, x.typ)
-	claims := []*logic.Term{logic.Not(isNilRef(x.val)), v.stretchNewOrIn(x.val[0], lo, hi, before, inFootprints)}
+	claims := []*logic.Term{logic.Not(isNilRef(x.val)), v.stretchNewOrIn(x.val[0], v.extent(x.val, x.typ), before, inFootprints)}
 	for _, part := range v.ownedParts(sink, mem, x.val, x.typ, map[types.Type]bool{}) {
 		switch {
 		case part.fp:
@@ -1345,9 +1350,9 @@ func (v *fnVerifier) freshOf(sink *state, x reached, mem memory, before *logic.T
 			// The states of an owned interface value are its own, which
 			// its contract governs; they are no memory x refers to.
 		case part.mapType != nil:
-			claims = append(claims, logic.Or(isNilRef(value{part.ref}), newOrIn(part.ref, logic.IntLit(0))))
+			claims = append(claims, logic.Or(isNilRef(value{part.ref}), newOrIn(part.ref, mapCell)))
 		default:
-			claims = append(claims, v.stretchNewOrIn(part.ref, part.lo, part.hi, before, inFootprints))
+			claims = append(claims, v.stretchNewOrIn(part.ref, part.span, before, inFootprints))
 		}
 	}
 	return logic.And(claims...)
@@ -1357,14 +1362,14 @@ func (v *fnVerifier) freshOf(sink *state, x reached, mem memory, before *logic.T
 // footprint of one of the interface values ys in the rows given, with
 // what rowAt says of the cell in those rows as its premises. With before
 // nil it states only the second.
-func (v *fnVerifier) newOrIn(alloc, pos, before *logic.Term, ys []reached, rows *logic.Term) *logic.Term {
+func (v *fnVerifier) newOrIn(alloc *logic.Term, pos spans.Byte, before *logic.Term, ys []reached, rows *logic.Term) *logic.Term {
 	options, facts := v.newOrInParts(alloc, pos, before, ys, rows)
 	return logic.Implies(logic.And(facts...), options)
 }
 
 // newOrInParts is newOrIn apart: the disjunction, and what rowAt says of
 // the cells it reads, which are facts.
-func (v *fnVerifier) newOrInParts(alloc, pos, before *logic.Term, ys []reached, rows *logic.Term) (*logic.Term, []*logic.Term) {
+func (v *fnVerifier) newOrInParts(alloc *logic.Term, pos spans.Byte, before *logic.Term, ys []reached, rows *logic.Term) (*logic.Term, []*logic.Term) {
 	var options, facts []*logic.Term
 	if before != nil {
 		options = append(options, logic.Le(before, alloc))
@@ -1381,20 +1386,22 @@ func (v *fnVerifier) newOrInParts(alloc, pos, before *logic.Term, ys []reached, 
 // up to hi. Whether the allocation is new does not depend on the position,
 // so it stands outside the quantifier, which then speaks only of the
 // footprints: Z3 can settle the first without the second.
-func (v *fnVerifier) stretchNewOrIn(ref, lo, hi, before *logic.Term, inFootprints func(alloc, pos *logic.Term) *logic.Term) *logic.Term {
+func (v *fnVerifier) stretchNewOrIn(ref *logic.Term, stretch spans.Span, before *logic.Term, inFootprints func(alloc *logic.Term, pos spans.Byte) *logic.Term) *logic.Term {
 	if v.lazyStretch != nil {
-		return logic.Or(logic.Le(before, ref), v.lazyStretch(ref, lo, hi))
+		return logic.Or(logic.Le(before, ref), v.lazyStretch(ref, stretch))
 	}
 	k := v.bound("k")
-	return logic.Or(logic.Le(before, ref), logic.Forall(k, logic.Implies(logic.And(logic.Le(lo, k), logic.Lt(k, hi)), inFootprints(ref, k))))
+	lo, hi := stretch.ByteBounds()
+	return logic.Or(logic.Le(before, ref), logic.Forall(k, logic.Implies(logic.And(logic.Le(lo, k), logic.Lt(k, hi)), inFootprints(ref, spans.AnyByte(k)))))
 }
 
 // stretchClaim is what a callee promised of a stretch of an allocation that
 // existed: every cell of it lies in the footprint of one of ys, in the
 // region the claim is kept for, when holds does.
 type stretchClaim struct {
-	holds, ref, lo, hi *logic.Term
-	ys                 []reached
+	holds, ref *logic.Term
+	span       spans.Span
+	ys         []reached
 }
 
 // rowClaim is what a callee promised of the row at a home in one footprint
@@ -1422,8 +1429,8 @@ func (v *fnVerifier) rowNewOrIn(mem memory, at, before *logic.Term, ys []reached
 		return holds
 	}
 	a, k := v.bound("a"), v.bound("k")
-	cell, facts := v.rowAt(mem.region(footprintRegion, footprintSort), at, a, k)
-	return logic.Forall(a, logic.Forall(k, logic.Implies(logic.And(append(facts, cell)...), v.newOrIn(a, k, before, ys, yRows))))
+	cell, facts := v.rowAt(mem.region(footprintRegion, footprintSort), at, a, spans.AnyByte(k))
+	return logic.Forall(a, logic.Forall(k, logic.Implies(logic.And(append(facts, cell)...), v.newOrIn(a, spans.AnyByte(k), before, ys, yRows))))
 }
 
 // withinRow states that every cell of what x refers to is in the row at a
@@ -1432,16 +1439,16 @@ func (v *fnVerifier) rowNewOrIn(mem memory, at, before *logic.Term, ys []reached
 // position of the struct a pointer points to, which is not nil.
 func (v *fnVerifier) withinRow(x reached, at *logic.Term, mem memory) *logic.Term {
 	rows := mem.region(footprintRegion, footprintSort)
-	in := func(alloc, pos *logic.Term) *logic.Term {
+	in := func(alloc *logic.Term, pos spans.Byte) *logic.Term {
 		cell, facts := v.rowAt(rows, at, alloc, pos)
 		return logic.Implies(logic.And(facts...), cell)
 	}
 	if isMap(x.typ) {
-		return logic.And(logic.Not(isNilRef(x.val)), in(x.val[0], logic.IntLit(0)))
+		return logic.And(logic.Not(isNilRef(x.val)), in(x.val[0], mapCell))
 	}
-	lo, hi := v.extent(x.val, x.typ)
+	lo, hi := v.extent(x.val, x.typ).ByteBounds()
 	k := v.bound("k")
-	every := logic.Forall(k, logic.Implies(logic.And(logic.Le(lo, k), logic.Lt(k, hi)), in(x.val[0], k)))
+	every := logic.Forall(k, logic.Implies(logic.And(logic.Le(lo, k), logic.Lt(k, hi)), in(x.val[0], spans.AnyByte(k))))
 	if isSlice(x.typ) {
 		return logic.Or(logic.Le(x.val[3], logic.IntLit(0)), every)
 	}
@@ -1457,7 +1464,7 @@ func (v *fnVerifier) withinOwned(sink *state, x, y reached) *logic.Term {
 	if sink == nil {
 		return logic.False()
 	}
-	lo, hi := v.extent(x.val, x.typ)
+	extent := v.extent(x.val, x.typ)
 	var options []*logic.Term
 	for _, part := range v.ownedParts(sink, y.mem, y.val, y.typ, map[types.Type]bool{}) {
 		switch {
@@ -1465,17 +1472,11 @@ func (v *fnVerifier) withinOwned(sink *state, x, y reached) *logic.Term {
 			options = append(options, v.withinRow(x, part.ref, y.mem))
 		case part.row, part.mapType != nil:
 		default:
-			inside := logic.And(logic.Not(isNilRef(x.val)), logic.Eq(x.val[0], part.ref), logic.Le(part.lo, lo), logic.Le(hi, part.hi))
-			if isSinglePointer(x.typ) {
-				// A pointer to a single value lies in the elements of an
-				// owned slice when it points to an element, and in an owned
-				// struct when it points to a place (F42).
-				if part.elem != nil {
-					inside = logic.And(inside, x.val[2])
-				} else {
-					inside = logic.And(inside, logic.Not(x.val[2]))
-				}
-			}
+			// A pointer to a single value lies in the elements of an owned
+			// slice when it points to an element, and in an owned struct
+			// at a place, or at an element of an array the struct holds
+			// (F42): its stretch is the cell of its region (spans.Box).
+			inside := logic.And(logic.Not(isNilRef(x.val)), logic.Eq(x.val[0], part.ref), spans.Inside(extent, part.span))
 			options = append(options, inside)
 		}
 	}
@@ -1493,33 +1494,33 @@ func (v *fnVerifier) withinOwned(sink *state, x, y reached) *logic.Term {
 // which stratification refuses, bytes.Buffer and strings.Builder grow
 // without a bound that can be stated, and types of the project own nothing
 // until ownership in source.
-func (v *fnVerifier) structuralFootprint(sink *state, mem memory, val value, t types.Type) func(alloc, pos *logic.Term) (*logic.Term, []*logic.Term) {
+func (v *fnVerifier) structuralFootprint(sink *state, mem memory, val value, t types.Type) func(alloc *logic.Term, pos spans.Byte) (*logic.Term, []*logic.Term) {
 	switch {
 	case isSlice(t):
-		lo, hi := v.extent(val, t)
-		return func(alloc, pos *logic.Term) (*logic.Term, []*logic.Term) {
-			return logic.And(logic.Lt(logic.IntLit(0), val[3]), logic.Eq(alloc, val[0]), logic.Le(lo, pos), logic.Lt(pos, hi)), nil
+		extent := v.extent(val, t)
+		return func(alloc *logic.Term, pos spans.Byte) (*logic.Term, []*logic.Term) {
+			return logic.And(logic.Lt(logic.IntLit(0), val[3]), logic.Eq(alloc, val[0]), extent.HoldsByte(pos)), nil
 		}
 	case isMap(t):
-		return func(alloc, pos *logic.Term) (*logic.Term, []*logic.Term) {
-			return logic.And(logic.Not(isNilRef(val)), logic.Eq(alloc, val[0]), logic.Eq(pos, logic.IntLit(0))), nil
+		return func(alloc *logic.Term, pos spans.Byte) (*logic.Term, []*logic.Term) {
+			return logic.And(logic.Not(isNilRef(val)), logic.Eq(alloc, val[0]), logic.Eq(pos.Term(), logic.IntLit(0))), nil
 		}
 	}
 	if _, isPointer := pointee(t); !isPointer {
 		return nil
 	}
-	lo, hi := v.extent(val, t)
+	extent := v.extent(val, t)
 	if v.ownsMemory(t) {
 		// An owner's footprint is its struct and what it owns, as it is
 		// then (step 4 of ownership in source).
-		return func(alloc, pos *logic.Term) (*logic.Term, []*logic.Term) {
+		return func(alloc *logic.Term, pos spans.Byte) (*logic.Term, []*logic.Term) {
 			owned, facts := v.ownerFootprintAt(sink, mem, val, t, alloc, pos, map[types.Type]bool{})
-			inStruct := logic.And(logic.Eq(alloc, val[0]), logic.Le(lo, pos), logic.Lt(pos, hi))
+			inStruct := logic.And(logic.Eq(alloc, val[0]), extent.HoldsByte(pos))
 			return logic.And(logic.Not(isNilRef(val)), logic.Or(inStruct, owned)), facts
 		}
 	}
-	return func(alloc, pos *logic.Term) (*logic.Term, []*logic.Term) {
-		return logic.And(logic.Not(isNilRef(val)), logic.Eq(alloc, val[0]), logic.Le(lo, pos), logic.Lt(pos, hi)), nil
+	return func(alloc *logic.Term, pos spans.Byte) (*logic.Term, []*logic.Term) {
+		return logic.And(logic.Not(isNilRef(val)), logic.Eq(alloc, val[0]), extent.HoldsByte(pos)), nil
 	}
 }
 
