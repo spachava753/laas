@@ -2,6 +2,7 @@ package solver
 
 import (
 	"bufio"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -613,8 +614,9 @@ type answer struct {
 	// time it took once a process was free.
 	effort int64
 	took   time.Duration
-	// stored is set for an answer read from the cache on disk, and for
-	// one the process kept after reading it there.
+	// stored is set for an answer read from the cache on disk that this
+	// process did not write there, and for one the process kept after
+	// reading it there.
 	stored bool
 }
 
@@ -665,6 +667,7 @@ func (s *Solver) answer(script string, values []string, who asker) (answer, bool
 			a.took = 0
 			return a, true, nil
 		}
+		pause("unremembered", nil)
 		if s.disk != nil {
 			if r, ok := s.disk.read(key); ok {
 				a, err := interpret(r)
@@ -675,14 +678,19 @@ func (s *Solver) answer(script string, values []string, who asker) (answer, bool
 					cacheFault("the answer cache entry %s is damaged: %v; to empty the cache, remove %s", s.disk.entryPath(key), err, s.disk.root)
 				}
 				// A sample of the answers read, drawn anew for each run, is
-				// solved again to watch the premise.
+				// solved again to watch the premise, also of an entry this
+				// process wrote, which another may have replaced.
 				s.disk.mu.Lock()
 				watched := s.disk.rng.IntN(watchRate) == 0
 				s.disk.mu.Unlock()
 				if watched {
 					s.watch(key, script, values, r, who)
 				}
-				a.stored = true
+				// An entry this process wrote holds an answer solved in this
+				// run, which is not one kept by another; see disk.written.
+				s.disk.mu.Lock()
+				a.stored = !s.disk.written[sha256.Sum256([]byte(key))]
+				s.disk.mu.Unlock()
 				s.remember(key, a)
 				return a, true, nil
 			}

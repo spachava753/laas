@@ -101,6 +101,13 @@ type disk struct {
 	identity string
 	hashes   map[fileKey]string
 	rng      *mrand.Rand
+	// written holds the hashes of the keys whose entries this process
+	// published. An asker reads one back when it missed the answer in
+	// memory while another asker was between writing the entry and keeping
+	// the answer, or after the answer was dropped from memory: it was
+	// solved in this run, and counting it as kept by an earlier run would
+	// make the counts of a run that starts empty depend on timing.
+	written map[[sha256.Size]byte]bool
 }
 
 // fileKey tells a file and its state apart, so that each is hashed once.
@@ -443,6 +450,12 @@ func (d *disk) write(key string, r reply) {
 	err := publish(filepath.Dir(path), path, content)
 	switch {
 	case err == nil:
+		d.mu.Lock()
+		if d.written == nil {
+			d.written = map[[sha256.Size]byte]bool{}
+		}
+		d.written[sha256.Sum256([]byte(key))] = true
+		d.mu.Unlock()
 		return
 	case !errors.Is(err, fs.ErrExist):
 		cacheFault("the answer cache %s cannot be written: %v; run without -vego.cache or with another directory", d.root, err)

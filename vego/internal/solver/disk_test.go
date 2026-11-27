@@ -761,3 +761,79 @@ func TestStoredAnswersAreZ3s(t *testing.T) {
 	}
 	t.Logf("%d entries checked against Z3", len(found))
 }
+
+// TestOwnEntriesAreNotStored checks that an answer this process solved and
+// wrote is never counted as one kept by another run when an asker reads it
+// back from the directory: one asker misses it in memory while another is
+// between writing the entry and keeping the answer, and an answer too long
+// to be kept in memory is read back. A run that starts with an empty
+// directory counts no stored answers, whatever the timing.
+func TestOwnEntriesAreNotStored(t *testing.T) {
+	z3 := z3Binary(t)
+	x := logic.Const("x", logic.Int)
+	goal := logic.Le(x, logic.Add(x, logic.IntLit(3)))
+
+	t.Run("read while another asker keeps it", func(t *testing.T) {
+		s := cached(t, z3, cacheDir(t))
+		flown, letFly := make(chan struct{}), make(chan struct{})
+		missed, letRead := make(chan struct{}), make(chan struct{})
+		var mu sync.Mutex
+		unremembered, flights := 0, 0
+		at(t, func(point string, _ *process) {
+			mu.Lock()
+			switch point {
+			case "unremembered":
+				unremembered++
+				if unremembered == 2 {
+					mu.Unlock()
+					close(missed)
+					<-letRead
+					return
+				}
+			case "flown":
+				flights++
+				if flights == 1 {
+					mu.Unlock()
+					close(flown)
+					<-letFly
+					return
+				}
+			}
+			mu.Unlock()
+		})
+		var costs [2]Cost
+		first := make(chan struct{})
+		go func() {
+			defer close(first)
+			s.Prove(nil, goal, Options{Observe: func(c Cost) { costs[0] = c }})
+		}()
+		<-flown
+		second := make(chan struct{})
+		go func() {
+			defer close(second)
+			s.Prove(nil, goal, Options{Observe: func(c Cost) { costs[1] = c }})
+		}()
+		<-missed
+		close(letFly)
+		<-first
+		close(letRead)
+		<-second
+		if costs[0].Stored || !costs[1].Cached || costs[1].Stored {
+			t.Fatalf("costs %+v, want the second answer read back and not counted as stored", costs)
+		}
+	})
+
+	t.Run("read back when not kept in memory", func(t *testing.T) {
+		saved := cacheBytes
+		cacheBytes = 0
+		t.Cleanup(func() { cacheBytes = saved })
+		s := cached(t, z3, cacheDir(t))
+		var costs []Cost
+		observed := Options{Observe: func(c Cost) { costs = append(costs, c) }}
+		s.Prove(nil, goal, observed)
+		s.Prove(nil, goal, observed)
+		if len(costs) != 2 || costs[0].Stored || !costs[1].Cached || costs[1].Stored {
+			t.Fatalf("costs %+v, want the second answer read back and not counted as stored", costs)
+		}
+	})
+}
