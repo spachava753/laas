@@ -1380,7 +1380,7 @@ func Histogram(scores []int) (buckets []int) {
 }
 ```
 
-`@Calls f(s)` names the parameter and gives names to the parameters of its type. The formula after `When` is what holds whenever `eachScore` calls `f`. It may name the parameters of `f` and those of `eachScore`, and it is read in the state at that call. `old` has no meaning there. A `Calls` annotation without `When` gives `f` no condition, and several for one parameter add up.
+`@Calls f(s)` names the parameter and gives names to the parameters of its type. The formula after `When` is what holds whenever `eachScore` calls `f`. It may name the parameters of `f` and those of `eachScore`, and it is read in the state at that call. `old(p)` of a parameter `p` of `eachScore` reads `p` as it was when `eachScore` was called, so `When Exists k in [0, |xs|) : x = old(xs[k])` says that `f` is handed only elements that `xs` held then. `old` of a parameter of `f` is an error. A `Calls` annotation without `When` gives `f` no condition, and several for one parameter add up.
 
 Inside `eachScore`, `f` may only be called. `vego` proves the `When` at each call. After the call, `vego` knows nothing of memory except what `eachScore` may write by its `Modifies` and what its other parameters refer to directly:
 
@@ -8649,16 +8649,11 @@ After the call, `vego` knows that each element is one that was there before, and
 // @Modifies ms
 // @Ensures Forall i in [0, |ms|) : ms'[i] != nil
 func OldestFirst(ms []*Member) {
-	slices.SortFunc(ms, func(a, b *Member) int {
-		if a == nil || b == nil {
-			return 0
-		}
-		return cmp.Compare(b.Age, a.Age)
-	})
+	slices.SortFunc(ms, func(a, b *Member) int { return cmp.Compare(b.Age, a.Age) })
 }
 ```
 
-The comparison knows only the types of what it is handed, so it tests its pointers for nil before it follows them.
+While the sort runs, `vego` knows that each element the comparison is handed is one the slice held when the sort was called. So the comparison can follow its pointers with no test for nil.
 
 Of a slice of structs, `vego` knows nothing of the elements after the call but their number, since a formula cannot compare two structs:
 
@@ -8675,21 +8670,18 @@ func AgesKept(ms []Member) {
 vego: postcondition may not hold: Forall i in [0, |ms|) : ms'[i].Age >= 0
 ```
 
-`sort.Slice` and `sort.SliceStable` have shipped contracts that claim the same as those of `slices.SortFunc` and `slices.SortStableFunc`. Their `less` function is handed two indices of the slice, each at least 0 and less than its length, so it can index the slice it sorts:
+`sort.Slice` and `sort.SliceStable` have shipped contracts that claim the same as those of `slices.SortFunc` and `slices.SortStableFunc`. Their `less` function is handed two indices of the slice, each at least 0 and less than its length. At each call of `less`, each element of the slice is one it held when the sort was called. So `less` can index the slice it sorts and follow what it finds:
 
 ```go
 // @Requires Forall i in [0, |ms|) : ms[i] != nil
 // @Modifies ms
 // @Ensures Forall i in [0, |ms|) : ms'[i] != nil
 func OldestFirstByIndex(ms []*Member) {
-	sort.Slice(ms, func(i, j int) bool {
-		if ms[i] == nil || ms[j] == nil {
-			return false
-		}
-		return ms[i].Age > ms[j].Age
-	})
+	sort.Slice(ms, func(i, j int) bool { return ms[i].Age > ms[j].Age })
 }
 ```
+
+What is known of the elements while the sort runs holds for the same element types as what is known after it. It also holds only for the slice that is sorted. A comparison that indexes another slice knows nothing of its elements.
 
 `sort.Slice` takes the slice as an `any` and panics when it is handed anything else. `vego` reads a call at the static type of the argument, so that type must be a slice type:
 
@@ -8942,7 +8934,7 @@ The literal reads `s[i]`. That read is in range because the contract of `sort.Se
       - "(Forall i in [0, n) : Forall j in [i, n) : f(i) -> f(j)) -> (0 <= result And result <= n And (Forall i in [0, result) : ~f(i)) And (result < n -> f(result)))"
 ```
 
-The field `calls` gives a contract to a function parameter. Its key names the parameter and gives names to the parameters of its function type, as in `f(i)`, or `do()` for a function without parameters. The `requires` under it states what holds whenever the trusted function calls `f`. It can name the parameters of `f` and those of the trusted function. It is read in the state at the time of that call. The parameter must also be listed under `runs`.
+The field `calls` gives a contract to a function parameter. Its key names the parameter and gives names to the parameters of its function type, as in `f(i)`, or `do()` for a function without parameters. The `requires` under it states what holds whenever the trusted function calls `f`. It can name the parameters of `f` and those of the trusted function. It is read in the state at the time of that call. `old(p)` of a parameter `p` of the trusted function reads `p` as it was when the trusted function was called, as in `Exists k in [0, |x|) : a = old(x[k])`. `old` of a parameter of `f` is an error, since `f`'s arguments exist only at its call. The parameter must also be listed under `runs`.
 
 #### What can be handed over
 

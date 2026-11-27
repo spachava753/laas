@@ -162,14 +162,15 @@ func sliceFuncCall[S ~[]E, E any](gen func(*rand.Rand) S, name string, call func
 // what it is given.
 func sliceCmpCall[S ~[]E, E any](gen func(*rand.Rand) S, call func(S, func(a, b E) int)) func(*rand.Rand) sample {
 	return func(rng *rand.Rand) sample {
-		s, calls := gen(rng), map[string][][]any{}
+		s, calls, during := gen(rng), map[string][][]any{}, map[string][][]any{}
 		cmp := func(a, b E) int {
 			calls["cmp"] = append(calls["cmp"], []any{a, b})
+			during["cmp"] = append(during["cmp"], []any{snapshot(s)[0], nil})
 			return rng.Intn(3) - 1
 		}
 		before := snapshot(s)
 		call(s, cmp)
-		return sample{before: []any{before[0], cmp}, after: []any{s, cmp}, calls: calls}
+		return sample{before: []any{before[0], cmp}, after: []any{s, cmp}, calls: calls, during: during}
 	}
 }
 
@@ -178,14 +179,15 @@ func sliceCmpCall[S ~[]E, E any](gen func(*rand.Rand) S, call func(S, func(a, b 
 // the indices it is given.
 func sliceLessCall[S ~[]E, E any](gen func(*rand.Rand) S, call func(S, func(i, j int) bool)) func(*rand.Rand) sample {
 	return func(rng *rand.Rand) sample {
-		s, calls := gen(rng), map[string][][]any{}
+		s, calls, during := gen(rng), map[string][][]any{}, map[string][][]any{}
 		less := func(i, j int) bool {
 			calls["less"] = append(calls["less"], []any{i, j})
+			during["less"] = append(during["less"], []any{snapshot(s)[0], nil})
 			return rng.Intn(2) == 0
 		}
 		before := snapshot(s)
 		call(s, less)
-		return sample{before: []any{before[0], less}, after: []any{s, less}, calls: calls}
+		return sample{before: []any{before[0], less}, after: []any{s, less}, calls: calls, during: during}
 	}
 }
 

@@ -13,8 +13,8 @@ type task struct {
 	due  int
 }
 
-// ByDue sorts pointers that are not nil, which stay not nil. The
-// comparison knows only the type of what it is handed, so it tests for nil.
+// ByDue sorts pointers that are not nil, which stay not nil, with a
+// comparison that tests for nil all the same.
 //
 // @Requires Forall i in [0, |ts|) : ts[i] != nil
 // @Modifies ts
@@ -28,12 +28,34 @@ func ByDue(ts []*task) {
 	})
 }
 
-// Unguarded follows what the comparison is handed with no nil test.
+// Unguarded follows what the comparison is handed with no nil test: each
+// is an element the slice held when the sort was called.
 //
 // @Requires Forall i in [0, |ts|) : ts[i] != nil
 // @Modifies ts
-// @Ensures True
+// @Ensures Forall i in [0, |ts|) : ts'[i] != nil
 func Unguarded(ts []*task) {
+	slices.SortFunc(ts, func(a, b *task) int { return cmp.Compare(a.due, b.due) })
+}
+
+// UnguardedStable sorts a slice after an append, by a comparison with no
+// nil test.
+//
+// @Requires Forall i in [0, |ts|) : ts[i] != nil
+// @Requires |ts| < 1000 And t != nil
+// @Modifies ts
+// @Ensures |r| = |ts| + 1
+func UnguardedStable(ts []*task, t *task) (r []*task) {
+	r = append(ts, t)
+	slices.SortStableFunc(r, func(a, b *task) int { return cmp.Compare(a.due, b.due) })
+	return r
+}
+
+// MaybeNil sorts pointers of which nothing says they are not nil.
+//
+// @Modifies ts
+// @Ensures True
+func MaybeNil(ts []*task) {
 	slices.SortFunc(ts, func(a, b *task) int { return cmp.Compare(a.due, b.due) }) // want `pointer may be nil, in the function literal run by slices.SortFunc` `pointer may be nil, in the function literal run by slices.SortFunc`
 }
 

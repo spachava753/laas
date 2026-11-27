@@ -160,3 +160,27 @@ func positive(x int) {}
 func Twice() {
 	twice(positive, positive)
 }
+
+type elem struct{ n int }
+
+// eachElem calls f with each element of xs, which its When says of each
+// argument: an element xs held when eachElem was called.
+//
+// @Calls f(p) When Exists k in [0, |xs|) : p = old(xs[k])
+// @Ensures True
+func eachElem(xs []*elem, f func(*elem)) {
+	// @Invariant 0 <= i
+	for i := range xs {
+		f(xs[i])
+	}
+}
+
+// Elems reads each element eachElem hands with no nil test.
+//
+// @Requires Forall i in [0, |xs|) : xs[i] != nil
+// @Ensures True
+func Elems(xs []*elem) {
+	eachElem(xs, func(p *elem) {
+		_ = p.n
+	})
+}

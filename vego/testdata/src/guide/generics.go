@@ -155,12 +155,7 @@ func OldestAfterSort(ms []Member) (r int) {
 // @Modifies ms
 // @Ensures Forall i in [0, |ms|) : ms'[i] != nil
 func OldestFirst(ms []*Member) {
-	slices.SortFunc(ms, func(a, b *Member) int {
-		if a == nil || b == nil {
-			return 0
-		}
-		return cmp.Compare(b.Age, a.Age)
-	})
+	slices.SortFunc(ms, func(a, b *Member) int { return cmp.Compare(b.Age, a.Age) })
 }
 
 // AgesKept sorts members, of whose elements nothing is known after.
@@ -178,12 +173,7 @@ func AgesKept(ms []Member) {
 // @Modifies ms
 // @Ensures Forall i in [0, |ms|) : ms'[i] != nil
 func OldestFirstByIndex(ms []*Member) {
-	sort.Slice(ms, func(i, j int) bool {
-		if ms[i] == nil || ms[j] == nil {
-			return false
-		}
-		return ms[i].Age > ms[j].Age
-	})
+	sort.Slice(ms, func(i, j int) bool { return ms[i].Age > ms[j].Age })
 }
 
 // SortAny sorts what an any holds.

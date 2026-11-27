@@ -54,7 +54,7 @@ trusted:
 		{"rejects a key without parameters", "version: 1\ntrusted:\n  sort.Search:\n    reason: r\n    calls:\n      f: {}\n    modifies: []\n", `"f" must name a function parameter and its parameters`},
 		{"rejects a key that is not names", "version: 1\ntrusted:\n  sort.Search:\n    reason: r\n    calls:\n      f(i + 1): {}\n    modifies: []\n", "must name a function parameter"},
 		{"rejects a contract that is not a mapping", "version: 1\ntrusted:\n  sort.Search:\n    reason: r\n    calls:\n      f(i):\n    modifies: []\n", "f(i) must be a mapping"},
-		{"rejects an unknown field of a contract", "version: 1\ntrusted:\n  sort.Search:\n    reason: r\n    calls:\n      f(i):\n        ensures: []\n    modifies: []\n", `unknown field "ensures" under f(i) in the calls of sort.Search; expected requires or deterministic`},
+		{"rejects an unknown field of a contract", "version: 1\ntrusted:\n  sort.Search:\n    reason: r\n    calls:\n      f(i):\n        ensures: []\n    modifies: []\n", `unknown field "ensures" under f(i) in the calls of sort.Search; expected requires, compares, or deterministic`},
 		{"rejects calls requires that do not parse", "version: 1\ntrusted:\n  sort.Search:\n    reason: r\n    calls:\n      f(i):\n        requires: [\"i <\"]\n    modifies: []\n", "syntax error in requires of f(i) in calls"},
 		{"accepts what a function keeps", "version: 1\ntrusted:\n  bufio.NewScanner:\n    reason: r\n    keeps:\n      r: [result]\n    modifies: []\n", ""},
 		{"rejects keeps that is not a mapping", "version: 1\ntrusted:\n  bufio.NewScanner:\n    reason: r\n    keeps: [r]\n    modifies: []\n", "keeps of bufio.NewScanner must map a parameter"},

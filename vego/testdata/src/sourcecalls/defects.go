@@ -347,3 +347,33 @@ func PeekPointer(q *cell, p *cells, f func()) (same bool) {
 	f()
 	return a == p.items[0].n // want `postcondition may not hold: same`
 }
+
+// eachOther calls f with what is not one of the elements its When names.
+//
+// @Calls f(p) When Exists k in [0, |xs|) : p = old(xs[k])
+// @Ensures True
+func eachOther(xs []*elem, f func(*elem)) {
+	f(&elem{}) // want `the When of the Calls annotation of f may not hold at this call: Exists k in \[0, \|xs\|\) : p = old\(xs\[k\]\)`
+}
+
+// ElemsMaybeNil reads what eachElem hands with no nil test, of a slice
+// whose elements may be nil.
+//
+// @Ensures True
+func ElemsMaybeNil(xs []*elem) {
+	eachElem(xs, func(p *elem) {
+		_ = p.n // want `pointer may be nil, in the function literal run by eachElem`
+	})
+}
+
+// eachCleared writes an element and then hands it to f: what its When
+// names is what xs held on entry, which was not nil.
+//
+// @Calls f(p) When Exists k in [0, |xs|) : p = old(xs[k])
+// @Requires |xs| > 0 And Forall i in [0, |xs|) : xs[i] != nil
+// @Modifies xs
+// @Ensures True
+func eachCleared(xs []*elem, f func(*elem)) {
+	xs[0] = nil
+	f(xs[0]) // want `the When of the Calls annotation of f may not hold at this call: Exists k in \[0, \|xs\|\) : p = old\(xs\[k\]\)`
+}

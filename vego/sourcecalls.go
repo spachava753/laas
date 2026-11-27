@@ -132,8 +132,9 @@ func (pv *pkgVerifier) readSourceCalls(fn *funcInfo) {
 			if c.node == nil {
 				continue
 			}
-			if mentionsOld(c.node) {
-				report(c.pos, "the When of a Calls annotation uses old, which has no meaning there: it is read in the state at each call of %s", name)
+			if other := oldOfOther(c.node, cb.fn, cb.params); other != "" {
+				report(c.pos, "the When of a Calls annotation uses old(%s), which has no meaning there: in a When, old names only a parameter of %s, "+
+					"read as it was when %s was called", other, fn.obj.Name(), fn.obj.Name())
 				return
 			}
 			cb.requires = append(cb.requires, &clause{kind: "When", text: c.text[strings.Index(c.text, " When ")+len(" When "):], node: c.node, pos: c.pos, res: c.res})
@@ -253,7 +254,12 @@ func (v *fnVerifier) callSourceParam(call *ast.CallExpr, cb *callback, st *state
 	}
 	u.reach(operands)
 	name := types.ExprString(call.Fun)
-	for _, fact := range v.callRequires(cb, given, v.entry, st) {
+	// old(p) in the When is p as it was on entry, the call of the function.
+	// What the When reads is read as a contract is, quietly: its reads are
+	// not operands of the call.
+	var facts []*logic.Term
+	v.quietly(func() { facts = v.callRequires(cb, given, v.entry, st, memory{}) })
+	for _, fact := range facts {
 		text := ""
 		for _, c := range cb.requires {
 			text = c.text

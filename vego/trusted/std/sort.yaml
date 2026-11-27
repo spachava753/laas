@@ -90,7 +90,8 @@ trusted:
       keeping it nowhere; pdqsort_func only swaps, in loops bounded by the
       indices whatever less answers, and its recursion is bounded by its
       limit. So it returns for any less, and x holds afterwards the
-      elements it held, as many times. Not said: the order, which a formula
+      elements it held, as many times; since it only swaps, x holds at
+      each call of less elements it held when Slice was called. Not said: the order, which a formula
       cannot state of every element type nor of a less that is no ordering;
       and at a type argument whose values a formula cannot compare, a
       struct, anything of the elements.
@@ -99,6 +100,8 @@ trusted:
     calls:
       less(i, j):
         requires: ["0 <= i < |x|", "0 <= j < |x|"]
+        compares:
+          - "Forall p in [0, |x|) : Exists q in [0, |x|) : x[p] = old(x[q])"
     modifies: [x]
     compares:
       - "Forall i in [0, |x'|) : Exists j in [0, |x|) : x'[i] = x[j]"
@@ -116,12 +119,16 @@ trusted:
       halves the stretch it merges; it calls less(i, j) with indices of x
       only, on the calling goroutine, while the call lasts, and keeps it
       nowhere. So it returns for any less, and x holds afterwards the
-      elements it held, as many times. Not said: the order, as for Slice.
+      elements it held, as many times, and at each call of less elements
+      it held when SliceStable was called. Not said: the order, as for
+      Slice.
     asserts: {S: [], E: []}
     runs: [less]
     calls:
       less(i, j):
         requires: ["0 <= i < |x|", "0 <= j < |x|"]
+        compares:
+          - "Forall p in [0, |x|) : Exists q in [0, |x|) : x[p] = old(x[q])"
     modifies: [x]
     compares:
       - "Forall i in [0, |x'|) : Exists j in [0, |x|) : x'[i] = x[j]"

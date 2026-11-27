@@ -52,6 +52,12 @@ type sample struct {
 	// one that the contract applies, what it returns for each argument.
 	calls   map[string][][]any
 	answers map[string]func(int64) int64
+	// during holds, for each function parameter with a contract under
+	// calls, the arguments of the call of the function as they were at
+	// every call of it in calls, in the order of its parameters, taken by
+	// snapshot: what a requires under calls reads of them in the state of
+	// that call, where old reads them as before holds them.
+	during map[string][][]any
 	// unwritten holds, where a function the call was handed writes the
 	// arguments, what they would be had only that function written them,
 	// to the capacity of each slice.
@@ -1426,6 +1432,24 @@ type snapped struct {
 
 // snapshot returns the arguments of a call as they are before it: each a
 // copy, of the elements of a slice up to its length and of the entries of
+// readsWritten reports whether a requires under calls names a parameter of
+// the function that its modifies lists, or uses old: what it reads of it
+// differs between the call of the function and the calls of what it was
+// handed.
+func readsWritten(fn *funcInfo, cb *callback) bool {
+	written := map[string]bool{}
+	for _, m := range fn.modifies {
+		written[m.name] = true
+	}
+	found := false
+	for _, c := range cb.requires {
+		c.node.Walk(func(n *logic.Node) {
+			found = found || (n.Kind == logic.NIdent && written[n.Name]) || (n.Kind == logic.NCall && n.Name == "old")
+		})
+	}
+	return found
+}
+
 // a map, with a print of everything it reaches.
 func snapshot(args ...any) []any {
 	before := make([]any, len(args))
@@ -2308,12 +2332,33 @@ func checkContract(t *testing.T, pv *pkgVerifier, key string, fn *funcInfo, harn
 			if cb == nil {
 				continue
 			}
-			for _, args := range call.calls[param.Name()] {
+			during := call.during[param.Name()]
+			if len(during) != len(call.calls[param.Name()]) && (during != nil || readsWritten(fn, cb)) {
+				t.Fatalf("the harness of %s records %d states in during for %d calls of %s, whose requires under calls read what the entry may write "+
+					"or use old: they would be judged in the state before the call, not at each call of %s",
+					key, len(during), len(call.calls[param.Name()]), param.Name(), param.Name())
+			}
+			for k, args := range call.calls[param.Name()] {
 				given := maps.Clone(env.given)
+				var givenOld map[*types.Var]*logic.Term
+				if during != nil {
+					// A plain path reads the arguments as they were at this
+					// call, and old(p) as they were before the call.
+					givenOld = env.given
+					for i, p := range fn.params {
+						if _, isFunc := p.Type().Underlying().(*types.Signature); !isFunc {
+							value := during[k][i]
+							if snap, ok := value.(snapped); ok {
+								value = snap.value
+							}
+							given[p] = g.groundTerm(value)
+						}
+					}
+				}
 				for i, p := range cb.params {
 					given[p] = g.groundTerm(args[i])
 				}
-				inner := &specEnv{v: env.v, fn: cb.fn, given: given, givenPost: map[*types.Var]*logic.Term{}}
+				inner := &specEnv{v: env.v, fn: cb.fn, given: given, givenOld: givenOld, givenPost: map[*types.Var]*logic.Term{}}
 				for _, c := range cb.requires {
 					formula, err := pv.res.Formula(c.node, inner)
 					if err != nil {

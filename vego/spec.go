@@ -58,6 +58,14 @@ type specEnv struct {
 	// now is the memory plain paths are read from, and post the memory
 	// primed paths and results are read from, nil where there is none.
 	now, post memory
+	// oldMem, where set, is the memory old(p) reads a parameter p in, for
+	// a requires under calls, where it is the memory at the call of the
+	// trusted function; notOld holds the parameters old may not name
+	// there, those of the function type. givenOld is what old(p) denotes
+	// where given is set.
+	oldMem   memory
+	notOld   map[*types.Var]bool
+	givenOld map[*types.Var]*logic.Term
 	// before is the number below which everything that existed before the
 	// call lies, for fresh.
 	before *logic.Term
@@ -678,6 +686,11 @@ func (e *specEnv) locateAt(name string, steps []logic.Step, when logic.When, thr
 	}
 	mem := e.now
 	switch {
+	case when == logic.Old && e.oldMem != nil:
+		if param := e.fn.paramNames[name]; param == nil || e.notOld[param] {
+			return reached{}, fmt.Errorf("old(%s): %s is not a parameter of %s", name, name, e.fn.obj.Name())
+		}
+		mem = e.oldMem
 	case isResult && when == logic.Primed:
 		return reached{}, fmt.Errorf("%s is a result and already denotes the state on return; drop the prime", name)
 	case isResult:
@@ -1525,6 +1538,9 @@ func (e *specEnv) readyMade(name string, when logic.When) (*logic.Term, bool) {
 	}
 	if when == logic.Primed {
 		return e.givenPost[param], e.givenPost[param] != nil
+	}
+	if when == logic.Old && e.givenOld != nil {
+		return e.givenOld[param], e.givenOld[param] != nil
 	}
 	return e.given[param], true
 }

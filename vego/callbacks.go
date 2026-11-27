@@ -1,6 +1,8 @@
 package vego
 
 import (
+	"cmp"
+	"errors"
 	"fmt"
 	"go/ast"
 	"go/token"
@@ -154,17 +156,21 @@ func (pv *pkgVerifier) trustedCall(fn *funcInfo, item trustCall) {
 			}
 		}
 	}
-	for _, formula := range item.requires {
+	compares := len(item.requires)
+	for i, formula := range slices.Concat(item.requires, item.compares) {
 		// The requires are read in the state at each call of the function
-		// parameter, and in no other, so old has no meaning in them.
-		if mentionsOld(formula.node) {
-			fn.defect("its calls requires %q for %s uses old, which has no meaning there: it is read in the state at each call of %s",
-				formula.text, item.name, item.name)
+		// parameter, and old(p) of a parameter p of the trusted function
+		// reads p in the state at the call of the trusted function. old of
+		// anything else has no meaning there.
+		if name := oldOfOther(formula.node, fn, cb.params); name != "" {
+			fn.defect("its calls requires %q for %s uses old(%s), which has no meaning there: in a requires under calls, old names only a parameter of %s, "+
+				"read as it was when %s was called", formula.text, item.name, name, fn.obj.Name(), fn.obj.Name())
 			return
 		}
 		cb.requires = append(cb.requires, &clause{
 			kind: "requires", text: formula.text, node: formula.node, res: pv.plain,
-			pos: pv.trustPos(fn.trust.file, formula.line, formula.col),
+			pos:      pv.trustPos(fn.trust.file, formula.line, formula.col),
+			compares: i >= compares,
 		})
 	}
 	cb.fn.requires = cb.requires
@@ -222,11 +228,23 @@ func mentionsMemory(t *logic.Term) bool {
 	return slices.ContainsFunc(t.Args, mentionsMemory)
 }
 
-// mentionsOld reports whether a formula uses old.
-func mentionsOld(n *logic.Node) bool {
-	found := false
+// oldOfOther returns the root of the first old(...) in a formula that is
+// not a parameter of fn, or one of the parameters of the function type,
+// which are values of the call of the function parameter; or "".
+func oldOfOther(n *logic.Node, fn *funcInfo, own []*types.Var) string {
+	found := ""
 	n.Walk(func(n *logic.Node) {
-		found = found || (n.Kind == logic.NCall && n.Name == "old")
+		if found != "" || n.Kind != logic.NCall || n.Name != "old" || len(n.Kids) != 1 {
+			return
+		}
+		root := n.Kids[0]
+		for len(root.Kids) > 0 && root.Kind != logic.NIdent {
+			root = root.Kids[0]
+		}
+		param := fn.paramNames[root.Name]
+		if root.Kind != logic.NIdent || param == nil || slices.Contains(own, param) {
+			found = cmp.Or(root.Name, "...")
+		}
 	})
 	return found
 }
@@ -234,19 +252,36 @@ func mentionsOld(n *logic.Node) bool {
 // callRequires resolves what holds when a trusted function calls a
 // function parameter: in memory as it is at that call, with the arguments
 // of that call for the parameters of the function type and those of the
-// call of the trusted function for its own.
-func (v *fnVerifier) callRequires(cb *callback, given []value, args map[*types.Var]value, st *state) []*logic.Term {
+// call of the trusted function for its own, and old(p) of a parameter p
+// of the trusted function in memory as it was at the call of the trusted
+// function, atCall. A clause under compares says nothing at an
+// instantiation where a formula cannot compare what it compares.
+func (v *fnVerifier) callRequires(cb *callback, given []value, args map[*types.Var]value, st *state, atCall memory) []*logic.Term {
 	all := map[*types.Var]value{}
 	for param, val := range args {
 		all[param] = val
 	}
+	own := map[*types.Var]bool{}
 	for i, param := range cb.params {
 		all[param] = given[i]
+		own[param] = true
 	}
-	env := &specEnv{v: v, sink: st, fn: cb.fn, args: all, now: st.mem}
+	env := &specEnv{v: v, sink: st, fn: cb.fn, args: all, now: st.mem, oldMem: atCall, notOld: own}
 	var facts []*logic.Term
 	for _, c := range cb.requires {
-		facts = append(facts, v.formula(c, c.node, env))
+		if !c.compares {
+			facts = append(facts, v.formula(c, c.node, env))
+			continue
+		}
+		t, err := v.resolverOf(c).Formula(c.node, env)
+		switch {
+		case errors.Is(err, errIncomparable) || errors.As(err, new(*logic.IncomparableError)):
+			continue
+		case err != nil:
+			v.misread(c, err)
+		}
+		v.noteIs(st, t)
+		facts = append(facts, t)
 	}
 	return facts
 }
@@ -392,7 +427,7 @@ func (v *fnVerifier) runHanded(call *ast.CallExpr, fn *funcInfo, args map[*types
 		for i, p := range cb.params {
 			given[i] = v.unknown(p.Name(), p.Type(), head)
 		}
-		for _, fact := range v.callRequires(cb, given, args, head) {
+		for _, fact := range v.callRequires(cb, given, args, head, atCall.mem) {
 			head.assume(fact)
 		}
 		// What the arguments of a run are known to be: their types and the

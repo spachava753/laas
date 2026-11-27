@@ -127,7 +127,7 @@ func UsesNoParam() {
 
 // @Ensures True
 func UsesOldCall() {
-	oldCall(1, nil) // want `its calls requires "old\(i\) >= 0" for f uses old, which has no meaning there: it is read in the state at each call of f`
+	oldCall(1, nil) // want `its calls requires "old\(i\) >= 0" for f uses old\(i\), which has no meaning there: in a requires under calls, old names only a parameter of oldCall, read as it was when oldCall was called`
 }
 
 // @Ensures True

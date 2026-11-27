@@ -56,3 +56,11 @@ func FromClosure(f func()) {
 	}
 	down(2)
 }
+
+// OldOfArgument puts an argument of f in old.
+//
+// @Calls f(x) When old(x) >= 0 // want `the When of a Calls annotation uses old\(x\), which has no meaning there: in a When, old names only a parameter of OldOfArgument, read as it was when OldOfArgument was called`
+// @Ensures True
+func OldOfArgument(f func(int)) {
+	f(1)
+}

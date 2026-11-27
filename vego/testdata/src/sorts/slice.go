@@ -22,6 +22,36 @@ func SliceByDue(ts []*task) {
 	})
 }
 
+// SliceUnguarded indexes the slice it sorts with no nil test: at each call
+// of less, each element is one the slice held when the sort was called.
+//
+// @Requires Forall i in [0, |ts|) : ts[i] != nil
+// @Modifies ts
+// @Ensures Forall i in [0, |ts|) : ts'[i] != nil
+func SliceUnguarded(ts []*task) {
+	sort.Slice(ts, func(i, j int) bool { return ts[i].due < ts[j].due })
+}
+
+// SliceTwice sorts one slice twice, by two keys.
+//
+// @Requires Forall i in [0, |ts|) : ts[i] != nil
+// @Modifies ts
+// @Ensures Forall i in [0, |ts|) : ts'[i] != nil
+func SliceTwice(ts []*task) {
+	sort.Slice(ts, func(i, j int) bool { return ts[i].name < ts[j].name })
+	sort.SliceStable(ts, func(i, j int) bool { return ts[i].due < ts[j].due })
+}
+
+// SliceOther compares by another slice, which the sort does not hold and
+// of whose elements nothing is known at the call.
+//
+// @Requires |us| = |ts| And Forall i in [0, |ts|) : ts[i] != nil
+// @Modifies ts
+// @Ensures True
+func SliceOther(ts, us []*task) {
+	sort.Slice(ts, func(i, j int) bool { return us[i].due < us[j].due }) // want `pointer may be nil \(Z3 reached its resource limit; -vego.rlimit raises it\), in the function literal run by sort.Slice` `pointer may be nil \(Z3 reached its resource limit; -vego.rlimit raises it\), in the function literal run by sort.Slice`
+}
+
 // StableNamed sorts a slice of a named type, which keeps its length.
 //
 // @Modifies ts

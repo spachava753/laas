@@ -125,6 +125,10 @@ type trustCall struct {
 	name     string
 	params   []string
 	requires []trustFormula
+	// compares holds requires that hold where a formula can compare the
+	// values they compare, and are dropped at an instantiation where it
+	// cannot; only the shipped files may list them.
+	compares []trustFormula
 	// deterministic says that the function relies on what it is handed
 	// returning the same result whenever it is called with the same
 	// arguments.
@@ -494,13 +498,19 @@ func (f *trustFile) addCalls(entry *trustEntry, node *yaml.Node, formulas func(s
 			switch field.Value {
 			case "requires":
 				call.requires = formulas("requires of "+key.Value+" in calls", value)
+			case "compares":
+				if !f.shipped {
+					f.problem(field.Line, "compares under %s in the calls of %s may be written only in the shipped files of vego", key.Value, entry.key)
+					continue
+				}
+				call.compares = formulas("compares of "+key.Value+" in calls", value)
 			case "deterministic":
 				if value.Kind != yaml.ScalarNode || (value.Value != "true" && value.Value != "false") {
 					f.problem(value.Line, "deterministic under %s in the calls of %s must be true or false", key.Value, entry.key)
 				}
 				call.deterministic = value.Value == "true"
 			default:
-				f.problem(field.Line, "unknown field %q under %s in the calls of %s; expected requires or deterministic", field.Value, key.Value, entry.key)
+				f.problem(field.Line, "unknown field %q under %s in the calls of %s; expected requires, compares, or deterministic", field.Value, key.Value, entry.key)
 			}
 		}
 		entry.calls = append(entry.calls, call)
@@ -952,7 +962,11 @@ func (pv *pkgVerifier) readEntry(fn *funcInfo, entry *trustEntry) {
 	// A requires is read in one state, so old(x) there could only mean x;
 	// it is refused rather than given that meaning without notice.
 	for _, c := range fn.requires {
-		if mentionsOld(c.node) {
+		usesOld := false
+		c.node.Walk(func(n *logic.Node) {
+			usesOld = usesOld || (n.Kind == logic.NCall && n.Name == "old")
+		})
+		if usesOld {
 			fn.defect("its requires %q uses old, which has no meaning there: a requires is read in the state of the call", c.text)
 		}
 	}
@@ -1191,8 +1205,23 @@ func (pv *pkgVerifier) checkTrusted(fn *funcInfo) {
 				for i, p := range cb.params {
 					given[i] = v.unknown(p.Name(), p.Type(), entry)
 				}
+				// A requires under compares that cannot compare its values
+				// at this instantiation is no part of its contract, for the
+				// runs and for the tests of the entry alike.
+				cb.requires = slices.DeleteFunc(cb.requires, func(c *clause) bool {
+					if !c.compares {
+						return false
+					}
+					all := maps.Clone(v.entry)
+					for i, p := range cb.params {
+						all[p] = given[i]
+					}
+					_, err := v.resolverOf(c).Formula(c.node, &specEnv{v: v, sink: entry.clone(), fn: cb.fn, args: all, now: entry.mem, oldMem: entry.mem})
+					return errors.Is(err, errIncomparable) || errors.As(err, new(*logic.IncomparableError))
+				})
+				cb.fn.requires = cb.requires
 				at := entry.clone()
-				facts := v.callRequires(cb, given, v.entry, at)
+				facts := v.callRequires(cb, given, v.entry, at, entry.mem)
 				// What f returns for an argument is stated for every argument
 				// its requires allow, read in the state at the call of the
 				// trusted function, so they may not read memory, which changes

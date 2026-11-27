@@ -245,14 +245,18 @@ trusted:
       which it sorts by heap; it calls cmp with two elements of x, on the
       calling goroutine, while the call lasts, and keeps it nowhere. So it
       returns for any cmp, one that is no ordering included, and x holds
-      afterwards the elements it held, as many times. Not said: the order,
+      afterwards the elements it held, as many times; since it only swaps, each
+      element cmp is handed is one x held when the sort was called. Not said: the order,
       which a formula cannot state of every element type nor of a cmp that
       is no ordering; and, at a type argument whose values a formula cannot
       compare, a struct, anything of the elements.
     asserts: {S: [], E: []}
     runs: [cmp]
     calls:
-      cmp(a, b): {}
+      cmp(a, b):
+        compares:
+          - "Exists k in [0, |x|) : a = old(x[k])"
+          - "Exists k in [0, |x|) : b = old(x[k])"
     modifies: [x]
     compares:
       - "Forall i in [0, |x'|) : Exists j in [0, |x|) : x'[i] = x[j]"
@@ -269,11 +273,15 @@ trusted:
       and a recursion that halves the stretch it merges; it calls cmp with
       two elements of x, on the calling goroutine, while the call lasts, and
       keeps it nowhere. So it returns for any cmp, and x holds afterwards the
-      elements it held, as many times. Not said: the order, as for SortFunc.
+      elements it held, as many times, and each element cmp is handed is one
+      x held when the sort was called. Not said: the order, as for SortFunc.
     asserts: {S: [], E: []}
     runs: [cmp]
     calls:
-      cmp(a, b): {}
+      cmp(a, b):
+        compares:
+          - "Exists k in [0, |x|) : a = old(x[k])"
+          - "Exists k in [0, |x|) : b = old(x[k])"
     modifies: [x]
     compares:
       - "Forall i in [0, |x'|) : Exists j in [0, |x|) : x'[i] = x[j]"
