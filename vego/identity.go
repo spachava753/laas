@@ -469,6 +469,7 @@ func (v *fnVerifier) noteIs(sink *state, t *logic.Term) {
 				v.targetSeen[note] = true
 				v.isTargets = append(v.isTargets, target)
 			}
+			v.censusTrees()
 			for _, tree := range v.trees {
 				v.treeInstance(sink, tree, target)
 			}

@@ -183,6 +183,7 @@ func (v *fnVerifier) noteTree(sink *state, tree errorTree) {
 	if sink == nil {
 		return
 	}
+	v.censusTrees()
 	for _, target := range v.isTargets {
 		v.treeInstance(sink, tree, target)
 	}

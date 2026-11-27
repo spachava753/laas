@@ -194,6 +194,13 @@ func (v *fnVerifier) eval(e ast.Expr, st *state, guard []*logic.Term) value {
 // evalAs evaluates an expression that is assigned to something of type want.
 // It differs from eval only for nil, which has no type of its own.
 func (v *fnVerifier) evalAs(e ast.Expr, want types.Type, st *state, guard []*logic.Term) value {
+	if v.census != nil {
+		stub, done := v.censusConversion(e, want, st)
+		if done == nil {
+			return stub
+		}
+		defer done()
+	}
 	if isFunc(want) && !v.isNil(e) {
 		return v.functionValue(e, want, st, guard)
 	}

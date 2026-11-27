@@ -56,3 +56,14 @@ func Doubles(xs []int) []int { return Map(xs, double) }
 // Upper calls a function of another module without an entry, with a
 // function of the standard library.
 func Upper(s string) string { return lib.Apply(unicode.ToUpper, s) }
+
+// Converted converts an array to an interface value, which is refused,
+// and then makes a channel: both are found, and nothing is left unseen
+// (F34 of the review).
+func Converted(a [4]int) int {
+	var s any = a
+	_ = s
+	ch := make(chan int)
+	_ = ch
+	return 0
+}

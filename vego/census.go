@@ -210,6 +210,7 @@ const (
 	rDeclaredInputs   refusal = "declared:inputs"
 	rInternal         refusal = "limit:internal"
 	rLimitAttempts    refusal = "limit:attempts"
+	rFacts            refusal = "limit:facts"
 	rAnnotationBroken refusal = "annotation:broken"
 	rAnnotateCalls    refusal = "annotate:calls"
 	rOwnsKept         refusal = "owns:kept"
@@ -377,6 +378,7 @@ var refusalClasses = map[refusal]string{
 	rDeclaredSizes:         "what only the declared memory of the trust file lets through, as a buffer converted to an io.Writer; not a cause",
 	rDeclaredInputs:        "a shipped entry that only the declaration that inputs end makes usable; not a cause",
 	rInternal:              "a panic of the verifier that is no refusal; the census stops the function there (The prover)",
+	rFacts:                 "a state of the census that holds more facts than the census follows; it stops the function there (Speed, under Before it is called ready)",
 	rLimitAttempts:         "more refusals in one function than the census follows; it stops the function there (The prover)",
 	rOwnsKept:              "memory an owner owns kept elsewhere: stored, held by a method value or a literal, or handed to what may keep it (Ownership in source)",
 	rOwnsSelf:              "an owner that may come to own itself (Ownership in source)",
@@ -805,9 +807,10 @@ type censusFunc struct {
 	seen    map[ast.Stmt]bool
 	stubs   map[any]bool
 	stopped bool
-	// attempts counts the attempts, and took is the time they took.
-	attempts int
-	took     time.Duration
+	// attempts counts the attempts, branches the branches they followed,
+	// and took is the time they took.
+	attempts, branches, steps int
+	took                      time.Duration
 	// stack holds what the attempt is executing: statements, expressions,
 	// and the named checks of verify; at is its copy where the last
 	// refusal was made.
@@ -828,10 +831,18 @@ type censusEvent struct {
 
 // censusFatal holds the classes after which an attempt cannot be helped by
 // a stub: a body in type parameters and the bound on paths.
-var censusFatal = map[refusal]bool{rGenericDeclared: true, rPaths: true}
+var censusFatal = map[refusal]bool{rGenericDeclared: true, rPaths: true, rFacts: true}
 
-// censusMaxAttempts bounds the attempts of one function.
-const censusMaxAttempts = 100
+// censusMaxAttempts bounds the attempts of one function, and
+// censusBranches the branches of all of them together.
+const (
+	censusMaxAttempts = 100
+	censusBranches    = 4 * maxBranches
+	censusSteps       = 200_000
+	censusFacts       = 20_000
+	censusTreeFacts   = 100_000
+	censusTrees       = 300
+)
 
 // censusKind says how the summary counts an event of a class.
 func censusKind(class refusal) string {
@@ -949,6 +960,19 @@ func (pv *pkgVerifier) runCensus(out, scope, trustPath string, looked bool) (any
 	}
 	if err := pv.writeCensus(pv.census.records[written:]); err != nil {
 		return nil, err
+	}
+	// What an annotated function of the package would publish, so that a
+	// callee in another package of the module is what it is in its own:
+	// its errors, its calls through values, and its summaries (F35 of the
+	// review of F41). Nothing is verified; only a census reads these.
+	for _, fn := range pv.order {
+		// A function with an entry is called by its entry, as in the
+		// standard library, whose shipped entries callers use.
+		if fn.annotated() && fn.obj.Exported() && fn.decl != nil && fn.closure == nil && !fn.broken && pv.entryFor(fn.obj.FullName()) == nil {
+			fact := pv.publishedContract(fn, false, true)
+			fact.Census = fn.censusMade
+			pv.pass.ExportObjectFact(fn.obj, fact)
+		}
 	}
 	return pv.usage, nil
 }
@@ -1141,11 +1165,16 @@ func (pv *pkgVerifier) censusAttempt(cf *censusFunc, fn *funcInfo, task func(*fn
 				cf.stopped = true
 				return
 			}
+			// The innermost entry not stubbed yet: a stub that did not help
+			// gives way to the one around it, up to the statement (F34 of
+			// the review of F41).
 			var target any
 			for i := len(cf.at) - 1; i >= 0 && target == nil; i-- {
-				target = cf.at[i]
+				if !cf.stubs[cf.at[i]] {
+					target = cf.at[i]
+				}
 			}
-			if target == nil || cf.stubs[target] {
+			if target == nil {
 				cf.stopped = true
 				return
 			}
@@ -1181,6 +1210,16 @@ func panicFrames() string {
 		}
 	}
 	return strings.Join(frames, " < ")
+}
+
+// censusTrees stops a census in a function whose errors with a known tree
+// and targets of errors.Is, gathered over every path it walks, have grown
+// past what it follows: each pair is a fact, stated on the path where a
+// tree or a target is met, so they grow with the square of the paths.
+func (v *fnVerifier) censusTrees() {
+	if v.census != nil && (len(v.trees) > censusTrees || len(v.trees)*len(v.isTargets) > censusTreeFacts) {
+		v.unsupported(v.fn.decl.Pos(), rFacts, fmt.Sprintf("the census met %d errors of known tree and %d targets of errors.Is over the paths of the function", len(v.trees), len(v.isTargets)))
+	}
 }
 
 // censusRefused is called where a refusal is made, before it panics: the
@@ -1219,6 +1258,39 @@ func (v *fnVerifier) censusEval(e ast.Expr, st *state) (val value, done func()) 
 	return nil, func() { v.census.stack = v.census.stack[:depth] }
 }
 
+// censusConversion is the start of evalAs in a census, for a conversion
+// to another type: a stubbed conversion looks at what it converts and is a
+// value of the type converted to about which nothing is known, and any
+// other is on the stack until done is called, so that a refusal of the
+// conversion stubs the conversion (F34 of the review of F41).
+func (v *fnVerifier) censusConversion(e ast.Expr, want types.Type, st *state) (val value, done func()) {
+	if types.Identical(v.info.TypeOf(e), want) {
+		return nil, func() {}
+	}
+	if _, ok := layoutOf(want); !ok {
+		return nil, func() {}
+	}
+	key := censusConvert{e}
+	if v.census.stubs[key] {
+		// What is converted is evaluated as it stands, without the
+		// conversion, which is what was refused.
+		inner := ast.Unparen(e)
+		if _, ok := layoutOf(v.info.TypeOf(e)); ok && !isFunc(v.info.TypeOf(e)) {
+			v.converting[inner]++
+			v.eval(e, st, nil)
+			v.converting[inner]--
+		} else {
+			v.censusOperands(e, st)
+		}
+		return v.unknown("census", want, st), nil
+	}
+	depth := v.census.push(key)
+	return nil, func() { v.census.stack = v.census.stack[:depth] }
+}
+
+// censusConvert is the key of a conversion on the stack of a census.
+type censusConvert struct{ e ast.Expr }
+
 // censusCheck runs a named check of verify in a census: a stubbed check is
 // left out.
 func (v *fnVerifier) censusCheck(name string, check func()) {
@@ -1246,6 +1318,18 @@ func (v *fnVerifier) censusStmt(s ast.Stmt, st *state, c ctrl, k func(*state), r
 	v.census.seen[s] = true
 	if labeled, ok := s.(*ast.LabeledStmt); ok {
 		v.census.seen[labeled.Stmt] = true
+	}
+	// The paths of a function, walked again in each attempt, are bounded
+	// by the statements walked, which bounds the time and the memory.
+	v.census.steps++
+	if v.census.steps > censusSteps {
+		v.unsupported(s.Pos(), rPaths, fmt.Sprintf("the census walked more than %d statements over the attempts of the function", censusSteps))
+	}
+	// What a state holds is bounded too: facts that relate every error made
+	// on the paths walked to every target met grow with the square of the
+	// paths, which a census walks more of than verification does.
+	if len(st.hyps) > censusFacts {
+		v.unsupported(s.Pos(), rFacts, fmt.Sprintf("a state of the census holds more than %d facts", censusFacts))
 	}
 	if v.census.stubs[s] {
 		v.censusStub(s, st, c, k)

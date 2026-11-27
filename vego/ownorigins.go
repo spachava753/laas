@@ -1671,7 +1671,11 @@ func (pv *pkgVerifier) ownSummaryOf(fn *funcInfo) *ownSummary {
 		for changed, round := true, 0; changed; round++ {
 			changed = false
 			for _, f := range local {
-				next, was := pv.ownSummarize(f), pv.ownSummaries[f.obj]
+				summarize := pv.ownSummarize
+				if testSummarize != nil {
+					summarize = testSummarize
+				}
+				next, was := summarize(f), pv.ownSummaries[f.obj]
 				if round >= widen {
 					next = joinSummaries(was, next)
 				}
@@ -1747,6 +1751,10 @@ func (pv *pkgVerifier) ownSummarize(fn *funcInfo) (summary *ownSummary) {
 	}
 	return summary
 }
+
+// testSummarize, set by a test, replaces ownSummarize in the iteration of
+// ownSummaryOf, so that an iteration that does not settle can be made.
+var testSummarize func(*funcInfo) *ownSummary
 
 // joinSummaries returns the summary that says of a function what both say
 // it may do: it keeps what either keeps, and a result is fresh only if both

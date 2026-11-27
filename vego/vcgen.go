@@ -1310,6 +1310,14 @@ func (v *fnVerifier) branch(pos token.Pos) {
 	if v.branches > maxBranches {
 		v.unsupported(pos, rPaths, "the function has too many paths to explore")
 	}
+	// A census walks a function again in each attempt, so the branches of
+	// all its attempts are bounded too.
+	if cf := v.census; cf != nil {
+		cf.branches++
+		if cf.branches > censusBranches {
+			v.unsupported(pos, rPaths, fmt.Sprintf("the census followed more than %d branches over the attempts of the function", censusBranches))
+		}
+	}
 }
 
 // switchStmt executes a switch as the chain of tests Go performs: cases are

@@ -50,6 +50,9 @@ type contractFact struct {
 	// CallsValues is set when running the function may make a call through
 	// a function value, itself or in what it calls; see mayCallValues.
 	CallsValues bool
+	// Census is set for the weakest contract a census gave a function
+	// without annotations, which an importing census counts as assumed.
+	Census bool
 	// Receiver names the receiver of the contract of a method of an
 	// interface, if it names one.
 	Receiver string
@@ -123,19 +126,26 @@ func (pv *pkgVerifier) exportContracts(excused map[*funcInfo]bool) {
 		if !fn.annotated() || !fn.obj.Exported() {
 			continue
 		}
-		fact := pv.contractFactOf(fn, fn.decl.Pos())
-		fact.Excused, fact.Verified, fact.KnownErrors = excused[fn], !unverified[fn], pv.knownReturns[fn]
-		fact.CallsValues = pv.mayCallValues(fn.obj)
-		summary := pv.memSummary(fn.obj)
-		fact.DerivedResults, fact.DerivedStores = summary.results, summary.stores
-		if own := pv.ownSummaryOf(fn); own != nil {
-			fact.OwnKeeps = own.keeps
-			for _, r := range own.results {
-				fact.OwnResults = append(fact.OwnResults, OwnResultFact{Fresh: r.fresh, From: r.from, Inside: r.inside, Unknown: r.unknown})
-			}
-		}
-		pv.pass.ExportObjectFact(fn.obj, fact)
+		pv.pass.ExportObjectFact(fn.obj, pv.publishedContract(fn, excused[fn], !unverified[fn]))
 	}
+}
+
+// publishedContract returns the fact of the contract of a function, with
+// what the package found of its errors, its calls through values, and what
+// it derives, keeps, and returns.
+func (pv *pkgVerifier) publishedContract(fn *funcInfo, excused, verified bool) *contractFact {
+	fact := pv.contractFactOf(fn, fn.decl.Pos())
+	fact.Excused, fact.Verified, fact.KnownErrors = excused, verified, pv.knownReturns[fn]
+	fact.CallsValues = pv.mayCallValues(fn.obj)
+	summary := pv.memSummary(fn.obj)
+	fact.DerivedResults, fact.DerivedStores = summary.results, summary.stores
+	if own := pv.ownSummaryOf(fn); own != nil {
+		fact.OwnKeeps = own.keeps
+		for _, r := range own.results {
+			fact.OwnResults = append(fact.OwnResults, OwnResultFact{Fresh: r.fresh, From: r.from, Inside: r.inside, Unknown: r.unknown})
+		}
+	}
+	return fact
 }
 
 // contractFactOf records the clauses of a contract written in this package
@@ -271,6 +281,10 @@ func (pv *pkgVerifier) importedContract(callee *types.Func) *funcInfo {
 		return nil
 	}
 	fn := pv.contractFromFact(callee, callee.Pkg(), fact)
+	if fact.Census && pv.census != nil {
+		fn.censusMade = true
+		pv.noteAssumedParams(fn)
+	}
 	pv.imported[callee] = fn
 	return fn
 }
