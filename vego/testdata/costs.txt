@@ -1118,6 +1118,8 @@ cycles/r9	cycles/r9.F	4	516	0
 cycles/r9	cycles/r9.Fn	3	804	0
 cycles/r9b	cycles/r9b.F	4	2012	0
 cycles/r9b	cycles/r9b.Getter.Get	3	804	0
+cycles/replacer	(*strings.Replacer).Replace	1	5044	0
+cycles/replacer	(cycles/replacer.Rep).Replace	4	12370	0
 cycles/runs/app	bufio.NewReader	1	9904	0
 cycles/runs/app	cycles/runs/app.UseCount	2	288	0
 cycles/runs/app	cycles/runs/app.UseFire	2	288	0

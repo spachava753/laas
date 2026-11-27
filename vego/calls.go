@@ -485,7 +485,7 @@ func (v *fnVerifier) checkHandedOver(call *ast.CallExpr, fn *funcInfo) {
 	}
 }
 
-// heldAs returns, for the two types of the standard library whose fields
+// heldAs returns, for the three types of the standard library whose fields
 // say less of what they can hold than their package does, the type that
 // says it, and replaced = true; every rule that asks whether a value can
 // hold code walks that type instead. Its field of type unsafe.Pointer
@@ -497,6 +497,12 @@ func (v *fnVerifier) checkHandedOver(call *ast.CallExpr, fn *funcInfo) {
 //     verified is assumed not to use to give memory another type.
 //   - runtime.Pinner holds the pointers it pins, which nothing reads as
 //     values or calls, so it holds nothing: held is nil.
+//   - strings.Replacer holds nothing of a caller (F6 of the review of the
+//     design of F43): its field r, an interface whose methods have exported
+//     names, is set only by buildOnce from build, which returns the
+//     replacers of package strings, holding strings and tables, in Go
+//     1.26.6 and 1.27.3 alike; its once and oldnew hold no code: held is
+//     nil.
 //
 // The types are matched by the path of their package and their name, not
 // by their shape. sync/atomic.Value and the other types of sync/atomic are
@@ -509,7 +515,7 @@ func heldAs(t types.Type) (held types.Type, replaced bool) {
 	switch path, name := named.Obj().Pkg().Path(), named.Obj().Name(); {
 	case path == "sync/atomic" && name == "Pointer" && named.TypeArgs().Len() == 1:
 		return types.NewPointer(named.TypeArgs().At(0)), true
-	case path == "runtime" && name == "Pinner":
+	case path == "runtime" && name == "Pinner", path == "strings" && name == "Replacer":
 		return nil, true
 	}
 	return nil, false

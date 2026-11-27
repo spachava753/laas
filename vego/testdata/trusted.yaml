@@ -3,6 +3,11 @@
 version: 1
 
 trusted:
+  # F43, F6 of the review of the design: a contract for the tests only.
+  (*strings.Replacer).Replace:
+    reason: A test helper; it returns a string and writes nothing a caller sees.
+    requires: ["r != nil"]
+    modifies: []
   # F43, F14 of the review of step 1: trusted functions handed a value that
   # code which is not verified made, whose method calls an ambient function.
   cycles/held/tv2lib.Run:

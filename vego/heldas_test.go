@@ -51,6 +51,7 @@ func TestHeldAs(t *testing.T) {
 		{"a struct holding atomic.Pointer of a struct that holds a function", types.NewStruct([]*types.Var{field("p", pointerOf(callback))}, nil), true},
 		{"atomic.Value", lookup("sync/atomic", "Value"), true},
 		{"runtime.Pinner", lookup("runtime", "Pinner"), false},
+		{"*strings.Replacer", types.NewPointer(lookup("strings", "Replacer")), false},
 		{"*os.File", types.NewPointer(lookup("os", "File")), false},
 		{"a struct with an unsafe.Pointer", raw, true},
 	} {
